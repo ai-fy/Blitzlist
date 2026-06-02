@@ -1,0 +1,38 @@
+# gitleaks config — extends the bundled default rules with project-specific
+# allowlist + a few extra signals.
+#
+# Use:
+#   gitleaks detect --source . --no-banner          # full repo scan
+#   gitleaks protect --staged --no-banner           # pre-commit (what .git/hooks/pre-commit runs)
+#
+# https://github.com/gitleaks/gitleaks
+
+[extend]
+useDefault = true
+
+# === Project-wide allowlist =================================================
+# Match documented identifiers we KNOW are not credentials.
+#
+# - Cloudflare D1/KV namespace IDs are resource identifiers, not secrets
+#   (per Cloudflare docs). They cannot be used without a separate API token.
+# - "BL-NNN" item IDs and other internal slugs.
+# - Diceware share codes in docs / smoke-tests (e.g. "cherry-meadow-stork-tango").
+
+[allowlist]
+description = "Documented non-secret identifiers"
+paths = [
+    '''(?i).*\.md$''',                  # all markdown docs (BL items, ARCHITECTURE, PRIVACY, etc.)
+    '''apps/api/wrangler\.toml$''',     # contains Cloudflare resource IDs (not secrets)
+    '''\.gitleaks\.toml$''',            # don't scan ourselves
+    '''pnpm-lock\.yaml$''',             # lockfile checksums are not secrets
+]
+regexes = [
+    # Cloudflare resource IDs (D1 database, KV namespace, Worker subdomain)
+    '''087beb6c-35d0-4fa0-82c5-2e46623957f8''',  # D1: blitzlist-dev
+    '''4f2fdf46cddf458ca6360d88dc9596e4''',      # KV: general
+    '''219dad750b614b7dbca3526e744712b1''',      # KV: OAuth
+    '''damp-glade-177b''',                       # Worker subdomain prefix
+    # Diceware test codes (publicly seeded, not secrets)
+    '''cherry-meadow-stork-tango''',
+    '''opal-orbit-pencil-tango''',
+]

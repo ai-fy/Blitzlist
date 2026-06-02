@@ -1,0 +1,9 @@
+id: epic-realtime
+type: epic
+name: Real-time updates via Durable Objects
+state: planned
+meta:
+  description: |
+    One Durable Object per workspace, holding WebSocket connections from
+    subscribed web clients. The Worker calls into the DO after every write
+    to fan out live events. See §13 of ARCHITECTURE.md.

@@ -1,0 +1,71 @@
+# Blitzlist API Worker — wrangler config
+#
+# Stub bindings for v0.1. Real IDs get populated when D1/KV/R2 are
+# provisioned via `wrangler d1 create`, `wrangler kv namespace create`,
+# `wrangler r2 bucket create` — or via the one-click "Deploy to Cloudflare"
+# template that ships in BL-017.
+#
+# To run locally: `pnpm dev` (uses miniflare, no real Cloudflare resources needed).
+# To deploy preview: `wrangler deploy --env preview`.
+
+name = "blitzlist-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# === Non-secret vars (visible in the deployed Worker config) ===
+[vars]
+# v0.1 spike auth (BL-008). Token itself is a SECRET — set via:
+#   wrangler secret put BLITZLIST_SPIKE_TOKEN
+# These two are non-secret IDs that the spike token resolves to.
+BLITZLIST_SPIKE_USER_ID = "usr-malte"
+BLITZLIST_SPIKE_WORKSPACE_ID = "ws-blitzlist"
+
+# --- D1 database (primary store) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "blitzlist-dev"
+database_id = "087beb6c-35d0-4fa0-82c5-2e46623957f8"
+migrations_dir = "migrations"
+
+# --- KV namespaces ---
+# General-purpose: session pointers, share-code cache, etc.
+[[kv_namespaces]]
+binding = "KV"
+id = "4f2fdf46cddf458ca6360d88dc9596e4"
+
+# Dedicated namespace for OAuth state (clients, grants, codes, tokens).
+# Managed by @cloudflare/workers-oauth-provider.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "219dad750b614b7dbca3526e744712b1"
+
+# --- R2 bucket (attachments — files, images, design assets) ---
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "blitzlist-attachments"
+
+# --- Durable Objects (real-time fanout per workspace; ships in BL-015) ---
+# Uncomment when WorkspaceDO class is implemented:
+# [[durable_objects.bindings]]
+# name = "WORKSPACE_DO"
+# class_name = "WorkspaceDO"
+#
+# [[migrations]]
+# tag = "v1"
+# new_classes = ["WorkspaceDO"]
+
+# --- Queues (async work: binary extraction, webhook reactions, email; ships v0.5) ---
+# Uncomment when queue consumers are implemented:
+# [[queues.producers]]
+# binding = "FILE_EXTRACTION_QUEUE"
+# queue = "blitzlist-file-extraction"
+#
+# [[queues.consumers]]
+# queue = "blitzlist-file-extraction"
+# max_batch_size = 10
+# max_batch_timeout = 30
+
+# --- Observability ---
+[observability]
+enabled = true

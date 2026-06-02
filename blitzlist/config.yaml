@@ -1,0 +1,50 @@
+# Blitzlist workspace + sync configuration
+#
+# This file binds the contents of blitzlist/ to a workspace in an MCP server.
+# Self-hosters: change the mcp.server_url and workspace to point at your instance.
+
+workspace:
+  slug: blitzlist                          # workspace identifier in the MCP server
+  name: Blitzlist (the project itself)
+  id_prefix: BL                            # item ID prefix; matches the slug or shorter
+
+mcp:
+  server_url: https://mcp.blitzlist.ai/mcp # the canonical instance
+  # For self-hosters, point at your own instance:
+  # server_url: https://api.yourcompany.com/mcp
+
+sync:
+  enabled: true                            # set false to disable sync entirely
+  direction: bidirectional                 # bidirectional | import-only | export-only
+
+  # How often the MCP server exports its changes back to this repo.
+  # Cron syntax. Smaller intervals mean fresher repo state but more PR noise.
+  export_cron: "*/5 * * * *"               # every 5 minutes
+
+  # How MCP→repo updates land in git.
+  # - "pr"            : open a PR, auto-merge if green
+  # - "direct-commit" : push directly to main (faster, fewer guardrails)
+  export_strategy: pr
+
+  # Auto-merge sync PRs if CI is green and there are no conflicts.
+  auto_merge_clean: true
+
+  # Items in these states are excluded from sync (e.g. don't pull spam/rejected items into repo).
+  exclude_states: [rejected]
+
+  # File path conventions
+  items_path: blitzlist/items
+  lists_path: blitzlist/lists
+  groups_path: blitzlist/groups
+  ledger_path: blitzlist/.sync/index.json
+
+# GitHub App installation (set by the App on install, do not edit by hand)
+github_app:
+  installation_id: null                    # set on app install
+  repo: malte/blitzlist                    # owner/repo
+
+# Validation rules (CI enforces these)
+validation:
+  require_assignee_for_in_progress: false  # set true if you want assignment gates
+  require_pr_url_for_in_review: true       # in_review items must link a PR
+  require_estimate_for_in_sprint: false    # require estimates in active sprint

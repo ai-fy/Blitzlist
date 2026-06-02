@@ -1,0 +1,9 @@
+id: epic-mcp-foundation
+type: epic
+name: MCP server foundation
+state: active
+meta:
+  description: |
+    The core MCP server on Cloudflare Workers: monorepo, Hono skeleton, D1
+    schema, Streamable HTTP MCP transport, and the first tools. Everything
+    that has to exist before any other epic can land.

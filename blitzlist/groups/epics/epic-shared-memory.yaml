@@ -1,0 +1,18 @@
+id: epic-shared-memory
+type: epic
+name: Shared memory primitives (docs, files, sync)
+state: active
+meta:
+  description: |
+    The three "shared memory" primitives that make Blitzlist more than a
+    backlog tool: items (work), documents (markdown knowledge), files
+    (binary artifacts, Dropbox-for-MCP). Plus the binary text extraction
+    pipeline and the local-sync community plugin API.
+
+    Together with the commitment-ledger features (epic-commitment-ledger),
+    this is the wedge that lets Blitzlist claim the "shared memory for AI-
+    augmented teams" tagline credibly.
+
+    Key items: BL-020 (documents), BL-021 (files), BL-022 (extraction
+    worker), BL-023 (versioning + unified search), BL-024 (local-sync API
+    + community plugins).

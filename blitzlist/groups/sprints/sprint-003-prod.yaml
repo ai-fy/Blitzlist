@@ -1,0 +1,19 @@
+id: sprint-003-prod
+type: sprint
+name: v1.0 — Production
+state: planned
+meta:
+  starts_at: 2026-07-06
+  ends_at: 2026-08-28
+  goal: |
+    Production-ready Blitzlist. Adds GitHub App for PR auto-state and repo
+    sync, email notifications via Queues + Resend, approvals workflow,
+    activity feed, R2 attachment upload from the web UI, Stripe billing,
+    and the **workspace export feature (BL-033)** that makes the no-lock-in
+    pitch credible.
+
+    Definition of done for v1.0: a paying customer can sign up, create a
+    workspace, invite teammates, install the MCP server, sync with their
+    own GitHub repo, run a full sprint, **export their entire workspace
+    on demand to take elsewhere**, and do all of this without our
+    intervention.

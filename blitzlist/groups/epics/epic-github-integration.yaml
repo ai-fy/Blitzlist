@@ -1,0 +1,11 @@
+id: epic-github-integration
+type: epic
+name: GitHub integration
+state: planned
+meta:
+  description: |
+    GitHub App with two responsibilities:
+    (1) PR webhooks → auto state transitions on items referenced in PR titles
+    (2) Bidirectional sync between blitzlist/ directory and the MCP database
+
+    Same app, same webhook receiver Worker. See SYNC.md.

@@ -1,0 +1,9 @@
+id: epic-auth
+type: epic
+name: Authentication & multi-tenancy
+state: planned
+meta:
+  description: |
+    OAuth 2.1 + DCR for MCP clients (via @cloudflare/workers-oauth-provider),
+    magic-link signup for humans, workspace membership, invite codes,
+    and per-token scope enforcement.

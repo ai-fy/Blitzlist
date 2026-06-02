@@ -1,0 +1,17 @@
+{
+  "name": "@blitzlist/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'web app not yet scaffolded — ships in BL-012'",
+    "build": "echo 'web app build: not yet scaffolded'",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint: not yet configured'",
+    "test": "echo 'test: not yet configured'",
+    "clean": "rm -rf dist .next"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,13 @@
+id: epic-bootstrap
+type: epic
+name: Bootstrap & dog-fooding
+state: active
+meta:
+  description: |
+    The meta-work of running Blitzlist's own backlog from this repo, including
+    the blitzlist/ directory conventions, the sync engine that mirrors the repo
+    to/from MCP once it exists, and the community contribution flow.
+
+    This epic spans sprints — the directory exists before any MCP code does
+    (sprint-001), the sync engine ships during multi-user beta (sprint-002),
+    and the polished community flow lands by v1.0 (sprint-003).

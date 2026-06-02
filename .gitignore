@@ -1,0 +1,72 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artifacts
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+wrangler.local.toml
+
+# Environment / secrets — never commit anything that grants access to a system
+.env
+.env.local
+.env.*.local
+.envrc
+secrets/
+*.secret
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+# Claude Code — share project-level skills, ignore personal preferences
+.claude/settings.local.json
+.claude/sessions/
+.claude/cache/
+.claude/transcripts/
+.claude/logs/
+
+# Landing static assets generated during dev
+apps/landing/dist/img/malte.jpg.bak
+apps/landing/dist/img/*.heic
+
+# Scratch
+scratch/
+tmp/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Local database
+*.sqlite
+*.sqlite-journal
+*.db

@@ -1,0 +1,32 @@
+id: backlog
+name: Product backlog
+description: |
+  The main backlog for building Blitzlist itself. Items here represent product
+  requirements, engineering tasks, and bootstrap work for the project.
+template_id: backlog
+states:
+  - draft
+  - proposed
+  - approved
+  - in_progress
+  - in_review
+  - done
+  - shipped
+  - rejected
+default_state: draft
+terminal_states: [done, shipped, rejected]
+fields:
+  - key: priority
+    type: enum
+    options: [p0, p1, p2, p3]
+    required: true
+  - key: estimate
+    type: string                   # free-form: "1d", "S", "M", "L", "XL"
+    required: false
+  - key: pr_url
+    type: url
+    required: false
+default_view: table
+color: '#FF6B35'
+icon: backlog
+archived: false

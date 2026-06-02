@@ -1,0 +1,10 @@
+{
+  "_meta": {
+    "format_version": 1,
+    "description": "Sync ledger — managed by the Blitzlist sync engine. Do not edit by hand. See ../SYNC.md.",
+    "workspace_slug": "blitzlist",
+    "last_synced_commit": null,
+    "last_exported_at": null
+  },
+  "items": {}
+}

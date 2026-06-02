@@ -1,0 +1,41 @@
+id: sprint-002-beta
+type: sprint
+name: v0.5 — Multi-user beta + the commitment-ledger + shared-memory wedge
+state: planned
+meta:
+  starts_at: 2026-06-05
+  ends_at: 2026-07-10
+  goal: |
+    Land the unique wedge features that differentiate Blitzlist from every
+    competitor.
+
+    **Commitment ledger:** stakeholder access keys + AI-mediated review,
+    release group type with promise→delivery verification, public roadmap
+    pages, Mermaid-rendered MCP responses, executor field for routing
+    across humans/agents.
+
+    **Shared memory primitives:** documents (markdown knowledge layer with
+    version history) and files (Dropbox-for-MCP — R2-backed binary artifacts
+    accessible by reference from any MCP client). Binary text extraction
+    pipeline so PPT/PDF/Word/Excel become text-queryable for Claude.
+
+    **Self-host:** one-click "Deploy to Cloudflare" button + docs.
+
+    Foundational multi-user: OAuth via @cloudflare/workers-oauth-provider,
+    magic-link signup, invite codes, workspaces, Durable Objects for live
+    updates, bidirectional repo sync.
+
+    Definition of done:
+    1. A stakeholder pastes a key into Claude Cowork, asks "what's in v1.2?",
+       gets a Mermaid roadmap + summary, gives feedback in chat, builder sees
+       structured feedback in Blitzlist.
+    2. A PM drops a PPT into a Blitzlist folder; designer's Claude pulls the
+       extracted text, writes a summary, uploads it back to the same folder.
+       Zero downloads, zero re-uploads.
+    3. A new user clicks "Deploy to Cloudflare" and has a running instance
+       in 3 minutes.
+
+    Out of scope: GitHub auto-state integration, billing, email notifications,
+    local-sync clients (the community builds those — BL-024).
+
+    Estimated duration: 5 weeks (was 3-4; the documents+files+extraction add ~10 days).

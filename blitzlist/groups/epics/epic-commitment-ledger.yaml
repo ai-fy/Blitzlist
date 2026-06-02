@@ -1,0 +1,17 @@
+id: epic-commitment-ledger
+type: epic
+name: Commitment ledger & MCP-first stakeholder UX
+state: active
+meta:
+  description: |
+    The unique wedge: long-term commitment memory, multi-executor routing,
+    release group type with promise-to-delivery verification, public roadmap
+    pages, stakeholder access keys with AI-mediated review, and Mermaid-
+    rendered MCP responses.
+
+    This is what separates Blitzlist from Backlog.md, Plane, Linear, and the
+    AI-PM crowd. Everything else is supporting infrastructure.
+
+    Key items: BL-009 (executor), BL-010 (release), BL-011 (stakeholder keys),
+    BL-012 (stakeholder MCP tools + Mermaid), BL-013 (public roadmap),
+    BL-018 (spawn Claude), BL-019 (release notes generator).

@@ -1,0 +1,31 @@
+{
+  "name": "@blitzlist/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint: not yet configured'",
+    "test": "echo 'test: not yet configured'",
+    "clean": "rm -rf dist .wrangler"
+  },
+  "dependencies": {
+    "@blitzlist/core": "workspace:*",
+    "@blitzlist/db": "workspace:*",
+    "@blitzlist/mcp": "workspace:*",
+    "@cloudflare/workers-oauth-provider": "^0.7.0",
+    "drizzle-orm": "^0.38.3",
+    "hono": "^4.6.14",
+    "qrcode": "^1.5.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.99.0"
+  }
+}

@@ -1,0 +1,9 @@
+id: epic-web-ui
+type: epic
+name: Web UI on Cloudflare Pages
+state: planned
+meta:
+  description: |
+    The stakeholder-facing web app: list views, item detail, sprint planning,
+    share links, settings. First decision is the shape — Next.js via
+    @cloudflare/next-on-pages, or Hono + JSX for v1.

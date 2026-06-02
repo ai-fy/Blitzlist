@@ -1,0 +1,16 @@
+{
+  "name": "@blitzlist/landing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static landing page for blitzlist.ai apex. Hand-edited HTML/CSS, deployed to Cloudflare Pages. Folds into the v0.5 web app (BL-013).",
+  "scripts": {
+    "build": "echo 'no build — static HTML in dist/'",
+    "deploy": "wrangler pages deploy dist --project-name blitzlist-landing --commit-dirty=true",
+    "deploy:preview": "wrangler pages deploy dist --project-name blitzlist-landing --branch preview --commit-dirty=true",
+    "typecheck": "echo 'no typecheck — static site'",
+    "test": "echo 'no tests yet'"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}

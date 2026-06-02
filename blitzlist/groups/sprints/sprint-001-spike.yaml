@@ -1,0 +1,18 @@
+id: sprint-001-spike
+type: sprint
+name: v0.1 — Single-user spike
+state: planned
+meta:
+  starts_at: 2026-05-28
+  ends_at: 2026-06-04
+  goal: |
+    Validate the capture-while-coding loop on Workers + D1.
+    Working MCP server with 5 core tools (add_item, list_items, get_item,
+    set_state, comment), no auth (token-paste), no web UI, no real-time.
+
+    Success criteria: a developer can install the MCP server into Claude Code,
+    capture an item from a session, list it later, change state, add a comment.
+    The whole loop works end-to-end on one local machine.
+
+    What we explicitly don't do here: OAuth, web app, Durable Objects,
+    multi-user, attachments, integrations.
