@@ -1,176 +1,28 @@
-# Blitzlist.ai — Architecture
+# Blitzlist — Architecture
 
-> **The shared workspace for hybrid human-agent teams. AI-first, MCP-native.**
->
-> Where humans and agents collaborate as peers — across plans, docs, files,
-> and decisions — without losing context between sessions, tools, or LLMs.
->
-> Open-source. Self-hostable on Cloudflare in one click.
->
-> ---
->
-> **Voice variants:**
-> - **Buyer-facing:** *Shared memory for AI-augmented teams.*
-> - **Dev-facing (README, social):** *MCP-native shared lists. Open-source. Self-hostable.*
+Technical design of the system: data model, runtime, MCP tool surface, auth tiers, web rendering, real-time, and deployment shape.
+
+This document is implementation-facing — written for contributors, future maintainers, and anyone forking the codebase. It assumes you've read the [README](./README.md) and want to understand HOW it's built. Product positioning, audience strategy, and the external-facing language live in [README.md](./README.md) and [PITCHES.md](./PITCHES.md) — they're deliberately not duplicated here so architecture decisions can stand on technical merit.
 
 ---
 
-## 1. Product positioning
+## 1. Context
 
-### Three voices, one product
+Three architectural choices shape everything below:
 
-Blitzlist's pitch lives in three coexisting voices, each calibrated to a different reader:
+- **MCP is the primary interface, not a feature.** The same tool surface drives the user's Claude Code, third-party AI clients, and (via shared helpers) the server-rendered web pages at `/r/<code>`. Whatever the data model exposes through MCP, the web inherits.
 
-| Voice | Audience | Use it where |
-|---|---|---|
-| **Category claim**: "The shared workspace for hybrid human-agent teams" | Investors, press, partners | Pitch deck, company tagline |
-| **Product tagline**: "Shared memory for AI-augmented teams" | Buyers, early adopters | Marketing site, ads |
-| **Technical tagline**: "Shared lists. Via MCP." | Vibe coders, OSS contributors | GitHub README, dev docs |
+- **Three auth tiers, one workspace.** Full members authenticate via OAuth 2.1 + DCR. Per-person external reviewers paste a bearer key (`blz_sk_…`) into their own MCP client. Anonymous "anyone with the link" visitors use a 4-word diceware URL where the path itself is the credential. All three share the same tool registry pattern; only the resolved `ScopedActor` shape differs (§5).
 
-All three describe the same product. None contradict. Pick the right voice for the room.
+- **Cloudflare-native runtime.** Workers (Hono) + D1 (SQLite at the edge) + R2 (zero-egress attachments) + KV (OAuth ephemeral state) + Durable Objects (per-workspace WebSocket fanout) + Queues (async work). One vendor, one CI pipeline, one secret store. Migration paths if any piece needs to move are documented in §15.
 
-### The problem we solve
-
-Today's productivity stack was built for humans typing in browser tabs. AI features were *retrofitted*: a sidebar here, a "summarize" button there. Humans still do all the maintenance — updating status, syncing docs, copy-pasting context between tools.
-
-When you bring an LLM into the loop, the seams show. Three frictions break the experience:
-
-1. **Context dies at session boundaries.** Your AI's todo list is gone after a day. Long-term product perspective has nowhere to live between Claude Code sessions.
-2. **Key artifacts can't move without humans.** Files, designs, decisions — every time you want another AI session, another LLM, or a human teammate to see them, somebody screenshots, downloads, copies, pastes. The work happens in the gaps between tools.
-3. **Even AI-to-AI handoff drops state.** Going from one AI session to another — even from the same vendor's products — loses context. There's no shared memory layer.
-
-Blitzlist is **AI-first from the foundation**: every primitive (items, documents, files) is designed to be accessed equally by humans and agents through MCP. It's the layer the existing productivity stack was never designed to be.
-
-### The product portfolio
-
-**Blitzlist** is both the **parent brand** and the **flagship integrated workspace product**. Inside Blitzlist lives one named module — **Blitzbox** — that has its own identity, target audience, and standalone marketing surface, while sharing the platform with the rest of Blitzlist (one MCP server, one auth layer, one data model, one codebase).
-
-This is the Notion / Atlassian model in a smaller form: same underlying platform, one distinct named module that can win its own category independently.
-
-| Brand | What it is | Standalone audience | Role inside Blitzlist |
-|---|---|---|---|
-| **Blitzlist** | The full hybrid-team workspace. Items + docs + files + sprints + workflows + collaboration + roadmaps. | Vibe coders, consulting teams, AI-augmented teams, B2B | (this IS Blitzlist — the integrated surface) |
-| **Blitzbox** | AI-native file sharing. Drop binaries; any MCP client (Claude Code, Cowork, claude.ai) reads them by reference. Dropbox for the LLM workflow. | LLM users, indie hackers, anyone juggling files between AI sessions | The files + attachments + document-storage surface |
-
-**Why two named brands, not one:**
-
-- **Blitzbox can win its own category independently.** "Share files with your AI" is a universal pain point felt by anyone who's ever screenshotted a PPT into Claude. That audience is much wider than "I need a hybrid-team workspace." A separately-branded Blitzbox landing page lets us capture this audience without making them think about the broader workspace pitch.
-- **Cross-pollination is free.** Someone uses Blitzbox solo to share files with their AI → discovers they can collaborate with teammates on the same files via Blitzlist → adopts the full workspace. Solo-user-to-team adoption pyramid (the Dropbox playbook).
-- **Engineering stays unified.** One platform, two marketing surfaces. Cost is in marketing, not code.
-- **Optionality.** If Blitzbox breaks out as a hit, we invest harder there without diluting Blitzlist's brand.
-
-**Launch sequence:**
-
-```
-v0.1 → v1.0    Blitzlist ships (the full workspace; file-sharing
-               is one of its features, not yet separately branded)
-v1.0 → v1.5    Blitzbox spins out as a standalone marketing
-               surface (sharper landing page, onboarding for
-               the "I just want to share files with my AI"
-               use case — same underlying MCP server, just a
-               different front door)
-v1.5+          Both live in parallel; cross-sell active;
-               "Blitzlist + Blitzbox" is the family narrative
-```
-
-**Architecturally, nothing changes.** Items, documents, files are already the three primitives in the data model (§3). Blitzbox is a *named marketing surface and lens* on the file-sharing subset of the platform, not a separate product with a separate stack. A Blitzbox-only user and a full Blitzlist user are calling the same MCP server with the same tools — the difference is what UI they land on and what features get emphasized in their onboarding.
-
-**Don't announce Blitzbox publicly at v1.0.** Saying "we're building two products" out of the gate dilutes focus and invites skepticism. Better to ship Blitzlist as a strong standalone (with file-sharing as one of its features), then peel Blitzbox out as a standalone landing page once the platform is proven and ready for parallel marketing surfaces.
-
-### Three audiences, three interfaces
-
-Blitzlist's defining axis isn't list type — it's audience. Each list, item, and roadmap is consumed by one of three audiences, each through a different interface:
-
-| Audience | Who | Primary interface | Auth |
-|---|---|---|---|
-| **Builder** | You, dev team, vibe coders | MCP via Claude Code | OAuth 2.1 + DCR |
-| **Executor** | AI agents, contractors, teammates, future-you | MCP with scoped token, OR web app | OAuth (scoped) or web session |
-| **Stakeholder** | Customers, OSS users, reviewers | **MCP via their own AI assistant** (Claude Cowork, claude.ai) OR public roadmap web view | Stakeholder access key (per-stakeholder, scope-limited) |
-
-### The MCP-first collaboration loop
-
-The innovative bit: **stakeholders connect to the same MCP server** via Claude Cowork (or any MCP-supporting AI client), authenticated by a per-stakeholder access key. They never visit our web app.
-
-```
-   Builder (Claude Code)                Stakeholder (Claude Cowork)
-         │                                       │
-         │ "Add a requirement: PR sync"          │ "What's in v1.2?"
-         │                                       │ "I'd prefer X to ship
-         │                                       │  in v1.1 not v1.2"
-         ▼                                       ▼
-         └──────────▶  Blitzlist MCP  ◀──────────┘
-                            │
-                            │  tools return both structured data
-                            │  AND visual artifacts (Mermaid diagrams,
-                            │  rendered summaries, executive briefs)
-                            ▼
-                     D1 + Durable Objects
-                            │
-                            │ live updates
-                            ▼
-                  Web UI (secondary; for tasks
-                  that don't fit conversational UX:
-                  bulk edits, attachments, settings)
-```
-
-**Why this is novel:**
-
-- Existing stakeholder portals require non-technical users to learn yet another web UI.
-- Blitzlist makes their **own AI assistant the UI** — they use the chat interface they already use daily.
-- MCP tools return **visual artifacts shaped for AI rendering** — Mermaid roadmaps, dependency graphs, state diagrams — not just JSON for a custom frontend.
-- Conversational feedback becomes structured because the stakeholder's AI translates "I want feature X earlier" into the right `submit_feedback(item_id=…, ...)` call.
-- **Faceless coordination**: builders and stakeholders don't need synchronous meetings; they each communicate with the system through their own AI, asynchronously.
-
-### Land → Expand → Vision
-
-The strategy is phased. We don't try to be the full shared workspace on day one — we start with a sharp wedge for vibe coders, then expand outward as the platform matures.
-
-"Shared workspace" is a known category (Notion, Slack, Coda all use the term). We claim that category and differentiate inside it with a sharper modifier: every other workspace was *built for humans typing in browser tabs, with AI bolted on later*. Blitzlist is built **AI-first**, with humans and agents as equal participants from the foundation. Same category, different physics.
-
-| Phase | Audience | Pitch | Timeframe | Distribution |
-|---|---|---|---|---|
-| **LAND** | Vibe coders + Claude Code power users | "Plan, approve, delegate to agents, monitor progress — persistent across sessions, with files and docs you share across your AI sessions and your teammates." | v0.1 → v1.0, **0-9 months** | GitHub, HN, MCP awesome-lists, Anthropic dev rel, Cloudflare partnership |
-| **EXPAND** | Small AI-augmented teams (3-20 people, mixed humans + agents) | "Shared workspace for your hybrid team. Stakeholders use their own AI; engineers use Claude Code; agents execute and report. One workspace, no tool-switching." | v1.0 → v2.0, **9-24 months** | Viral via stakeholder keys + public roadmaps; content on hybrid-team workflows |
-| **VISION** | Productivity-suite scale | "The AI-first shared workspace where humans and agents are equal participants." | v2.0+, **2-5 years** | Enterprise sales, ecosystem partners, integrations |
-
-The vision is the north star, not the v1 promise. We earn the right to the larger pitch by nailing the smaller one first.
-
-### Core jobs to be done (LAND phase)
-
-These are what we sell to vibe coders today:
-
-1. **Capture a commitment in 5 seconds** without leaving the terminal.
-2. **Survive across sessions** — return to a project after a week and Claude knows exactly what's open, what's promised, what's blocking.
-3. **Route work** to whichever executor (AI agent, human, yourself) makes sense, and track state regardless of who does it.
-4. **Share files with your other AI sessions** — drop a PPT into a folder, every Claude session you spawn can read it via MCP. No downloads, no re-uploads.
-5. **Share a roadmap with a customer** by giving them an access key; they review via their own Claude — no account, no UI to learn.
-6. **At release, auto-generate release notes** that verify delivered vs. promised, with traceable links from promise → PR → shipped feature.
-7. **Self-host the whole thing** on Cloudflare in 3 minutes, $5/month, full control of your own workspace.
-
-### Why this position is defensible
-
-The productivity tools market is crowded, but every incumbent shares the same structural weakness: **they were built for humans, then had AI added**. That's not a fixable defect with a feature — it's a foundation choice.
-
-The market scan (May 2026) showed that no single competitor lights up the shared-workspace pitch with AI-first foundations:
-
-|  | Long-term memory | Multi-executor routing | AI-mediated stakeholder UX | Promise→release verification | Shared files via MCP | One-click self-host |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Claude Code Tasks API | ❌ | ❌ | ❌ | ❌ | ❌ | n/a |
-| Backlog.md | partial | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Plane (MCP, OSS) | partial | ❌ | ❌ | partial | ❌ | partial |
-| Linear MCP | partial | ❌ | ❌ | partial | ❌ | ❌ (SaaS) |
-| ProductBoard / Aha! | partial | ❌ | ❌ | ✅ but heavy | ❌ | ❌ |
-| Wiki/database tools (Notion-class) | partial | ❌ | ❌ | ❌ | partial | varies |
-| File-sharing tools (Dropbox-class) | ❌ | ❌ | ❌ | ❌ | retrofitted | varies |
-| **Blitzlist** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-The individual features are copyable. The **AI-first foundation + synthesis + n8n-style distribution** is the moat. Retrofitted AI tooling can match a feature in a quarter; it can't rebuild its foundation in less than years.
+Three data primitives — items, documents, files — sit underneath three audience tiers (builder, executor, stakeholder), each with their preferred interface (Claude Code, web/MCP scoped, AI client of their choice). The diagram below shows how requests flow through the platform; the rest of this document zooms in on each piece.
 
 ---
 
 ## 2. System overview
 
-Everything runs on **Cloudflare's developer platform**. One vendor, one CI pipeline, one secret store. The web app may move to Vercel later if Cloudflare Pages proves too rough for our UI needs (see §16 Migration paths).
+Everything runs on **Cloudflare's developer platform**. One vendor, one CI pipeline, one secret store. The web app may move to Vercel later if Cloudflare Pages proves too rough for our UI needs (see §15 Migration paths).
 
 ```
                        ┌──────────────────────────┐
@@ -710,7 +562,7 @@ Document types are informational (used for organizing and filtering), not enforc
 
 ### Files — the Dropbox-for-MCP layer
 
-The bigger wedge. In LLM-augmented work, binary files bounce between platforms constantly: upload to web Claude, download, screenshot for paste, re-upload, etc. Files solves this by making the file a **reference-able resource** that all MCP clients can read and write without moving bytes through humans.
+In LLM-augmented work, binary files bounce between platforms constantly: upload to web Claude, download, screenshot for paste, re-upload. The `files` primitive resolves this by making each file a **reference-able resource** that any MCP client can read or write — bytes stay in R2, only opaque IDs cross the wire.
 
 The Dropbox insight: **files don't move; references do.** R2's zero-egress economics make this viable for us where it would be expensive elsewhere.
 
@@ -742,7 +594,7 @@ For Claude clients that have Anthropic Skills (`pptx`, `xlsx`, `pdf`, `docx`), t
 
 **Versioning is Dropbox-style:** updates create a new `file_versions` row pointing at a new R2 object. Previous versions retained per workspace policy (default: last 10 versions, 90 days). Restore via `restore_file_version(file_id, version)`.
 
-**Local sync (the Dropbox client equivalent)** is published as a **separate community project** — see §17 and BL-024. We define the API; OSS contributors build the actual sync clients per OS. Keeps Blitzlist focused on the server side.
+**Local sync (the Dropbox client equivalent)** is published as a **separate community project** — see §16 and BL-024. We define the API; OSS contributors build the actual sync clients per OS. Keeps Blitzlist focused on the server side.
 
 ### Relation labels (free-text, with registered defaults)
 
@@ -887,7 +739,7 @@ The same flexible metric scoring drives the human 3D visual AND the AI's "what s
 | `get_compass_snapshot`     | `{list?, group?, format?: "json"\|"svg"\|"three"}` — returns the full Compass scene: JSON for programmatic use, SVG for sharing in chat, Three.js scene description for the web client. Uses the relevant list's compass_config to map metrics → visual slots. |
 | `explain_score`            | `{item_id, metric_key?}` — returns AI's reasoning per metric (or one specific metric). Transparency for "why is this scored 0.8 on novelty?" |
 
-### Commitment-ledger tools (the wedge)
+### Commitment-ledger tools
 
 | Tool                       | Purpose                                                                       |
 |----------------------------|-------------------------------------------------------------------------------|
@@ -1168,7 +1020,7 @@ Hosted on **Cloudflare Pages**. For v1 we have two viable shapes — pick after 
 - **(a) Next.js via `@cloudflare/next-on-pages`** — familiar DX, full Next.js features, slightly rougher on Pages than on Vercel.
 - **(b) Hono + JSX server rendering** — simpler stack, perfect for a CRUD/admin UI, no hydration story to debug. Migrate to a real React SPA later when interaction richness justifies it.
 
-If Pages proves too rough at any point, the web app pulls out to Vercel without affecting the Worker (see §16 Migration paths). The data plane and MCP/OAuth surfaces stay on Cloudflare regardless.
+If Pages proves too rough at any point, the web app pulls out to Vercel without affecting the Worker (see §15 Migration paths). The data plane and MCP/OAuth surfaces stay on Cloudflare regardless.
 
 Routes (using Next.js App Router naming; same paths apply to the Hono+JSX variant):
 
@@ -1191,7 +1043,7 @@ Routes (using Next.js App Router naming; same paths apply to the Hono+JSX varian
 - `/s/[code]` — **share code view** — anyone with link; three- or four-word code; web channel of `share_codes`. Replaces the legacy `/share/[token]` route.
 - `/w/[slug]/share` — owner UI for minting, listing, and revoking share codes
 
-The web app talks to the same Hono API via cookie session. Both surfaces share the same authorization layer; the bearer-token path just resolves the session differently. Live UI updates come from a WebSocket to the workspace's Durable Object (see §15).
+The web app talks to the same Hono API via cookie session. Both surfaces share the same authorization layer; the bearer-token path just resolves the session differently. Live UI updates come from a WebSocket to the workspace's Durable Object (see §14).
 
 ### Item view UX: hierarchy + minimal attachments
 
@@ -1260,7 +1112,7 @@ All-Cloudflare for v1. One platform, one CLI (`wrangler`), one secret store.
 
 **Self-hosting is a first-class feature, not an afterthought.** Like n8n, every self-hosted instance is a foothold — community contribution, stakeholder exposure to the product, advocacy. We optimize hard for this.
 
-### One-click self-host (the n8n-style moat)
+### One-click self-host
 
 The README has a prominent **"Deploy to Cloudflare" button** that:
 1. Forks the repo to the user's GitHub account
@@ -1341,13 +1193,13 @@ blitzlist/
 - Token-paste auth (not OAuth) — just to feel the tool flow
 - No web UI, no Durable Objects yet. Goal: validate the capture-while-coding loop and shake out the wrangler/D1 dev experience.
 
-**v0.5 — Multi-user beta + the commitment-ledger wedge (3–4 weeks)**
+**v0.5 — Multi-user beta + commitment-ledger feature set (3–4 weeks)**
 - Workspaces, magic-link signup, invite codes
 - OAuth 2.1 + DCR for MCP via `@cloudflare/workers-oauth-provider`
 - **Stakeholder access keys** (the AI-mediated stakeholder UX) **+ share codes** (anyone-with-the-link sharing for MCP + web)
 - **Executor field + routing** (human / agent / self / contractor)
 - **Release group type + promise→delivery verification**
-- **Public roadmap pages** (`/r/[workspace]/...`) — the marketing surface
+- **Public roadmap pages** (`/r/<code>`) — the share-code-rendered public surface
 - **Visual MCP rendering** (Mermaid Gantt for roadmaps, graph for relations)
 - Minimal web UI on Pages: list view + item detail + comments + stakeholder key management
 - Sprint assignment + state machine
@@ -1393,39 +1245,7 @@ Order of implementation in v2.0 is open; we ship what users ask for fastest, in 
 
 ---
 
-## 11. The three frictions we erase (marketing pillars)
-
-These are the three problems we keep coming back to in every pitch, demo, and piece of content. Codifying them here so they survive positioning drift.
-
-### Friction 1: Context dies at session boundaries
-
-**Today's experience:** Your Claude Code session ends. The next morning, you re-open Claude Code on the same project. The session-bound todo list is gone. You spend 10 minutes re-explaining what you were working on, what's blocking, what's planned.
-
-**Blitzlist erases it:** `documents` hold the long-form project context. `items` hold the active work. Every Claude Code session that connects to your workspace starts with full memory — `select_default_list("project")` + `get_document("brief")` and you're back where you left off.
-
-**Demo line:** *"After a week away, your AI knows what you promised, what's open, what's blocked, and what's next."*
-
-### Friction 2: Artifacts can't move without humans
-
-**Today's experience:** PM has a PPT. To get Claude to read it, PM uploads to web Claude, downloads the analysis, screenshots, pastes into Slack, designer screenshots back, etc. Files bounce through humans on every hop.
-
-**Blitzlist erases it:** Files live in R2 with zero-egress. Any MCP client — your Claude Code, the designer's Claude Cowork, a stakeholder's claude.ai — can `get_file()` or `get_file_text()` directly. Generated artifacts are pushed back to the same workspace via `upload_file()`. **The file doesn't move; references do.**
-
-**Demo line:** *"Drop a deck in /reviews. Your designer's Claude reads it, writes a one-pager, pushes it back. You see both files in the same folder the next morning. No downloads in between."*
-
-### Friction 3: AI-to-AI handoff drops state
-
-**Today's experience:** Even within one vendor's ecosystem (Cowork → Code, Claude.ai → Claude Code), context doesn't follow you. Cross-vendor handoff (ChatGPT → Claude, Cursor → Claude Code) is even worse — full re-explanation every time.
-
-**Blitzlist erases it:** Every MCP-capable AI client connects to the same Blitzlist MCP server. Items, documents, and files are the same regardless of which client read or wrote them. Bridge by design.
-
-**Demo line:** *"Discuss a plan in Cowork. Implement in Claude Code. Brief a stakeholder in their claude.ai. All three sessions see the same items, docs, and files. No re-explanation."*
-
-These three frictions exist because the existing productivity stack was built for humans typing in browser tabs. AI was retrofitted. Blitzlist is the layer that was missing all along.
-
----
-
-## 12. The canonical user journey (v0.5 acceptance test)
+## 11. The canonical user journey (v0.5 acceptance test)
 
 The eleven-step flow below is **the dog-food story** — what every piece of v0.5 is built to enable, and the integration test that decides whether v0.5 ships. If any step requires manual workarounds, that's the bug to fix before launch.
 
@@ -1472,7 +1292,7 @@ This is also the **integration acceptance test for v0.5**: real end-to-end run w
 
 ---
 
-## 13. Open questions to resolve before coding
+## 12. Open questions to resolve before coding
 
 1. **Pricing model** — per-seat? per-workspace? free for solo? Affects data model (do we need seat counting?). *Recommendation: free for solo workspaces + self-host; hosted per-seat above 3 members.*
 2. **Hosted vs. self-host** — *Decided: BOTH from v0.5. Self-host is a first-class feature, the moat is the community.*
@@ -1484,7 +1304,7 @@ This is also the **integration acceptance test for v0.5**: real end-to-end run w
 
 ---
 
-## 14. Risks & non-goals
+## 13. Risks & non-goals
 
 **Risks**
 - *Yet-another-issue-tracker fatigue.* Differentiation has to come from the commitment-ledger + AI-mediated stakeholder loop being genuinely better than `gh issue create`, Linear's MCP, or ProductBoard. The pitch must lead with the wedge, not the features.
@@ -1493,7 +1313,7 @@ This is also the **integration acceptance test for v0.5**: real end-to-end run w
 - *MCP client fragmentation.* Different clients render Mermaid differently; some not at all. Mitigation: always return both diagram and narrative summary; degrade gracefully.
 - *Auto-state-update accuracy.* If we wrongly transition states, trust dies fast. Bias toward conservative auto-transitions + clear audit trail.
 - *OAuth UX on first install.* Browser handoffs feel heavy. Mitigate with great copy on the consent screen and a 10-second video on the install page.
-- *Cloudflare Pages roughness for Next.js.* If we hit limits we can't work around (image optimization, certain middleware patterns, ISR edge cases), the web app pulls out to Vercel without affecting the data plane (see §16). The public roadmap page especially needs to be polished — if Pages can't render it beautifully, that's a wedge problem, not just a tech problem.
+- *Cloudflare Pages roughness for Next.js.* If we hit limits we can't work around (image optimization, certain middleware patterns, ISR edge cases), the web app pulls out to Vercel without affecting the data plane (see §15). The public roadmap page especially needs to be polished — if Pages can't render it beautifully, that's a discovery problem, not just a tech problem.
 - *D1 ceiling.* 10–50GB per DB and SQLite write-throughput limits could bite at scale. Unlikely before 10k+ active workspaces; we'd shard by workspace before then. Migration path to Postgres exists via Drizzle dialect swap.
 - *Dependency on Claude Cowork.* If Cowork sunsets or changes auth model, the marquee stakeholder UX degrades. Mitigation: the stakeholder access key works with any MCP client; Cowork is the headline example but not the only one.
 
@@ -1506,7 +1326,7 @@ This is also the **integration acceptance test for v0.5**: real end-to-end run w
 
 ---
 
-## 15. Real-time architecture (Durable Objects)
+## 14. Real-time architecture (Durable Objects)
 
 The "PM watches items move as Claude works" experience is powered by **one Durable Object per workspace**. A DO is a singleton actor with strongly-consistent storage and the ability to hold long-lived connections.
 
@@ -1556,7 +1376,7 @@ type LiveEvent =
 
 ---
 
-## 16. Migration paths
+## 15. Migration paths
 
 The architecture is shaped so we can swap parts under pressure without rewriting the rest.
 
@@ -1578,7 +1398,7 @@ The architecture is shaped so we can swap parts under pressure without rewriting
 
 ---
 
-## 17. Community plugin API: local-sync agent
+## 16. Community plugin API: local-sync agent
 
 The Dropbox magic comes from the local-folder-that-just-syncs. We don't build this ourselves — we **publish the API** and let the community build per-OS sync clients (macOS menu bar app, Windows tray, Linux daemon, mobile share extensions).
 
@@ -1618,7 +1438,7 @@ This is the n8n integration ecosystem strategy — make the protocol stable, let
 
 ---
 
-## 18. Bootstrap: dog-fooding via `blitzlist/` directory
+## 17. Bootstrap: dog-fooding via `blitzlist/` directory
 
 Blitzlist's own product backlog lives in this repository under [`blitzlist/`](./blitzlist/) as Markdown + YAML files. We dog-food the product from day one: the backlog exists before the MCP server does, then syncs with the live MCP server once it's running.
 
