@@ -56,6 +56,7 @@ import { listTemplates } from './list-templates.js';
 import { createList } from './create-list.js';
 import { closeList } from './close-list.js';
 import { generateReleaseNotes } from './generate-release-notes.js';
+import { setListDefaultView } from './set-list-default-view.js';
 import { addItem } from './add-item.js';
 import { addItems } from './add-items.js';
 import { getItem } from './get-item.js';
@@ -80,6 +81,7 @@ export const toolRegistry = createToolRegistry<Db>([
 	createList,
 	closeList,
 	generateReleaseNotes,
+	setListDefaultView,
 	addItem,
 	addItems,
 	getItem,

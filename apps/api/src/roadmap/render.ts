@@ -12,7 +12,7 @@
  */
 
 import type { lists, items, templates, workspaces, comments } from '@blitzlist/db';
-import type { FieldDef, ListMeta, StakeholderPermission } from '@blitzlist/db';
+import type { DefaultView, FieldDef, ListMeta, StakeholderPermission } from '@blitzlist/db';
 
 type ListRow = typeof lists.$inferSelect;
 type ItemRow = typeof items.$inferSelect;
@@ -35,7 +35,33 @@ export type RenderInput = {
 	display_name?: string;
 	/** Banner message to show at top (e.g. after a form submit). */
 	flash?: { kind: 'ok' | 'error'; message: string };
+	/** Override the resolved view (from URL ?view=... query param). */
+	view_override?: DefaultView;
 };
+
+/**
+ * Resolve which view to render. Precedence:
+ *   1. URL override (?view=kanban)
+ *   2. List-level override (list.meta_json.default_view)
+ *   3. Template default (template.default_view)
+ *   4. Hard fallback to 'list'
+ *
+ * Unimplemented views (calendar, compass) fall back to 'list' until they ship.
+ */
+const IMPLEMENTED_VIEWS = ['list', 'kanban', 'table', 'todo'] as const;
+type ImplementedView = (typeof IMPLEMENTED_VIEWS)[number];
+
+function resolveView(input: RenderInput): ImplementedView {
+	const fromOverride = input.view_override;
+	const fromList = (input.list.meta_json as ListMeta).default_view;
+	const fromTemplate = input.template?.default_view as DefaultView | undefined;
+	for (const candidate of [fromOverride, fromList, fromTemplate]) {
+		if (candidate && IMPLEMENTED_VIEWS.includes(candidate as ImplementedView)) {
+			return candidate as ImplementedView;
+		}
+	}
+	return 'list';
+}
 
 type StateTone = 'on-track' | 'at-risk' | 'off-track' | 'shipped' | 'pending' | 'neutral';
 
@@ -54,6 +80,9 @@ export function renderRoadmap(input: RenderInput): string {
 		create: permissions.includes('create'),
 	};
 	const interactive = can.comment || can.edit || can.create;
+
+	const view = resolveView(input);
+	const listDefault = (list.meta_json as ListMeta).default_view;
 
 	const groups = new Map<string, ItemRow[]>();
 	for (const state of stateOrder) groups.set(state, []);
@@ -101,13 +130,14 @@ export function renderRoadmap(input: RenderInput): string {
 			<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="36" height="36" />
 			<span>Blitzlist</span>
 		</a>
-		<div class="ws">${escape(workspace.name)}</div>
+		<div class="header-meta">
+			${interactive ? renderHeaderCaps(permissions, input.display_name, share_code) : ''}
+			<div class="ws">${escape(workspace.name)}</div>
+		</div>
 	</header>
 
 	<main>
 		${input.flash ? `<div class="flash flash-${input.flash.kind}">${escape(input.flash.message)}</div>` : ''}
-
-		${renderActionBar(share_code, permissions, input.display_name, interactive)}
 
 		<section class="hero">
 			<div class="hero-row">
@@ -118,12 +148,21 @@ export function renderRoadmap(input: RenderInput): string {
 					${list.description ? `<p class="hero-desc">${escape(list.description)}</p>` : ''}
 				</div>
 			</div>
-			<div class="hero-meta">${renderListMeta(meta, isClosed)}</div>
+			<div class="hero-meta-row">
+				<div class="hero-meta">${renderListMeta(meta, isClosed)}</div>
+				<div class="hero-controls">
+					${renderViewSwitcher(view, listDefault, share_code, can.edit)}
+					${renderExportDropdown(share_code)}
+				</div>
+			</div>
 			${isClosed && breakdown ? renderBreakdown(breakdown, items, stateField) : renderLiveSummary(items, stateField)}
 		</section>
 
-		<section class="items">
-			${renderGroups(stateOrder, groups, noState, terminalStates, schemaFields, can, stateField, share_code, commentsByItem, input.display_name)}
+		<section class="items items-view-${view}">
+			${renderItemsForView(view, {
+				stateOrder, groups, noState, terminalStates, schemaFields, can, stateField,
+				shareCode: share_code, commentsByItem, displayName: input.display_name, items,
+			})}
 		</section>
 
 		${can.create ? renderNewItemForm(share_code, input.display_name, stateField) : ''}
@@ -140,6 +179,7 @@ export function renderRoadmap(input: RenderInput): string {
 			<a href="https://github.com/ai-fy/Blitzlist" rel="noopener">github</a>
 		</div>
 	</footer>
+	${pageScript(share_code)}
 </body>
 </html>`;
 }
@@ -379,49 +419,322 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 	`;
 }
 
-function renderActionBar(
-	shareCode: string,
+function renderHeaderCaps(
 	permissions: StakeholderPermission[],
 	displayName: string | undefined,
-	interactive: boolean,
+	shareCode: string,
 ): string {
 	const capLabels = permissions
 		.filter((p) => p === 'read' || p === 'comment' || p === 'edit' || p === 'create')
 		.map((p) => `<span class="cap cap-${p}">${capLabel(p)}</span>`)
 		.join('');
-
-	const identityRow = interactive
-		? `<div class="action-bar-row identity-row">
-				<div class="action-group action-group-caps">
-					<span class="action-group-label">You can</span>
-					${capLabels}
-				</div>
-				<form class="action-group action-group-signas" method="POST" action="/r/${escape(shareCode)}/identify">
-					<label for="display-name" class="action-group-label">Sign as</label>
-					<input id="display-name" type="text" name="display_name" value="${escape(displayName ?? '')}" placeholder="Your name (optional)" maxlength="40" />
-					<button type="submit">Save</button>
-				</form>
-			</div>`
-		: '';
-
 	return `
-		<section class="action-bar" aria-label="Page actions">
-			${identityRow}
-			<div class="action-bar-row actions-row">
-				<div class="action-group action-group-export">
-					<span class="action-group-label">Export</span>
-					<a class="action-btn" href="/r/${escape(shareCode)}/export.csv" download>
-						${DOWNLOAD_ICON}<span>CSV</span>
-					</a>
-					<a class="action-btn" href="/r/${escape(shareCode)}/export.md" download>
-						${DOWNLOAD_ICON}<span>Markdown</span>
-					</a>
-					<a class="action-btn" href="/r/${escape(shareCode)}/export.xlsx" download>
-						${DOWNLOAD_ICON}<span>Excel</span>
-					</a>
+		<div class="header-caps">
+			<span class="header-caps-label">you can</span>
+			${capLabels}
+			<form class="header-signas" method="POST" action="/r/${escape(shareCode)}/identify">
+				<input type="text" name="display_name" value="${escape(displayName ?? '')}" placeholder="sign as…" maxlength="40" />
+				<button type="submit" title="Save name">${CHECK_ICON}</button>
+			</form>
+		</div>
+	`;
+}
+
+// === View dispatcher + per-view renderers ===================================
+
+type ViewArgs = {
+	stateOrder: string[];
+	groups: Map<string, ItemRow[]>;
+	noState: ItemRow[];
+	terminalStates: Set<string>;
+	schemaFields: FieldDef[];
+	can: Capabilities;
+	stateField: FieldDef | undefined;
+	shareCode: string;
+	commentsByItem: Record<string, CommentRow[]>;
+	displayName: string | undefined;
+	items: ItemRow[];
+};
+
+function renderItemsForView(view: ImplementedView, args: ViewArgs): string {
+	switch (view) {
+		case 'list':
+			return renderGroups(args.stateOrder, args.groups, args.noState, args.terminalStates, args.schemaFields, args.can, args.stateField, args.shareCode, args.commentsByItem, args.displayName);
+		case 'kanban':
+			return renderKanbanView(args);
+		case 'table':
+			return renderTableView(args);
+		case 'todo':
+			return renderTodoView(args);
+	}
+}
+
+// --- Kanban view -----------------------------------------------------------
+
+function renderKanbanView(args: ViewArgs): string {
+	const cols: string[] = [];
+	const ordered = args.stateOrder.length > 0 ? args.stateOrder : Array.from(args.groups.keys());
+	for (const state of ordered) {
+		const arr = args.groups.get(state) ?? [];
+		const tone: StateTone = args.terminalStates.has(state) ? 'shipped' : stateTone(state);
+		cols.push(`
+			<div class="kanban-col" data-state="${escape(state)}" data-tone="${tone}">
+				<div class="kanban-col-header">
+					${statusPill(state, tone)}
+					<span class="kanban-col-count">${arr.length}</span>
+				</div>
+				<div class="kanban-col-cards">
+					${arr.map((it) => renderKanbanCard(it, tone, args)).join('') || '<div class="kanban-empty">—</div>'}
 				</div>
 			</div>
-		</section>
+		`);
+	}
+	if (args.noState.length > 0) {
+		cols.push(`
+			<div class="kanban-col">
+				<div class="kanban-col-header">
+					${statusPill('No state', 'neutral')}
+					<span class="kanban-col-count">${args.noState.length}</span>
+				</div>
+				<div class="kanban-col-cards">
+					${args.noState.map((it) => renderKanbanCard(it, 'neutral', args)).join('')}
+				</div>
+			</div>
+		`);
+	}
+	if (cols.length === 0) return `<p class="empty">No items in this list yet.</p>`;
+	return `<div class="kanban-board">${cols.join('')}</div>`;
+}
+
+function renderKanbanCard(item: ItemRow, tone: StateTone, args: ViewArgs): string {
+	const fields = item.fields_json as Record<string, unknown>;
+	const interesting = args.schemaFields
+		.filter((f) => f.key !== 'state' && fields[f.key] !== undefined && fields[f.key] !== null)
+		.slice(0, 3);
+	const commentCount = (args.commentsByItem[item.id] ?? []).length;
+	const draggable = args.can.edit ? 'true' : 'false';
+	return `
+		<article class="kanban-card tone-${tone}" draggable="${draggable}" data-item-id="${escape(item.id)}">
+			<div class="kanban-card-head">
+				<code class="kanban-card-id">${escape(item.id)}</code>
+				${commentCount > 0 ? `<span class="kanban-card-comments">${SPEECH_ICON}${commentCount}</span>` : ''}
+			</div>
+			<div class="kanban-card-title">${escape(item.title)}</div>
+			${item.body ? `<p class="kanban-card-desc">${escape(item.body)}</p>` : ''}
+			${interesting.length > 0 ? `<div class="kanban-card-chips">${interesting.map((f) => fieldChip(f, fields[f.key])).join('')}</div>` : ''}
+		</article>
+	`;
+}
+
+// --- Table view ------------------------------------------------------------
+
+function renderTableView(args: ViewArgs): string {
+	if (args.items.length === 0) return `<p class="empty">No items in this list yet.</p>`;
+	const cols: Array<{ key: string; label: string; isField: FieldDef | null }> = [
+		{ key: '_expand', label: '', isField: null },
+		{ key: 'id', label: 'ID', isField: null },
+		{ key: 'title', label: 'Title', isField: null },
+	];
+	if (args.stateField) {
+		cols.push({ key: 'state', label: args.stateField.label ?? 'State', isField: args.stateField });
+	}
+	cols.push({ key: '_description', label: 'Description', isField: null });
+	// Add up to 3 more interesting fields from the template.
+	for (const f of args.schemaFields) {
+		if (f.key === 'state') continue;
+		if (cols.length >= 8) break;
+		cols.push({ key: f.key, label: f.label ?? f.key, isField: f });
+	}
+	const ordered = orderItemsByState(args.items, args.stateOrder, args.terminalStates);
+	return `
+		<div class="table-wrap">
+			<table class="items-table">
+				<thead>
+					<tr>${cols.map((c) => `<th class="th-${c.key}">${escape(c.label)}</th>`).join('')}</tr>
+				</thead>
+				<tbody>
+					${ordered.map((it) => renderTableRow(it, cols, args)).join('')}
+				</tbody>
+			</table>
+		</div>
+	`;
+}
+
+function renderTableRow(item: ItemRow, cols: Array<{ key: string; label: string; isField: FieldDef | null }>, args: ViewArgs): string {
+	const fields = item.fields_json as Record<string, unknown>;
+	const hasBody = !!item.body && item.body.trim().length > 0;
+	const tds = cols.map((c) => {
+		if (c.key === '_expand') {
+			return `<td class="td-expand">${hasBody ? CHEVRON_DOWN_ICON : ''}</td>`;
+		}
+		if (c.key === 'id') return `<td class="td-id"><code>${escape(item.id)}</code></td>`;
+		if (c.key === 'title') return `<td class="td-title">${escape(item.title)}</td>`;
+		if (c.key === '_description') {
+			if (!hasBody) return `<td class="td-empty">—</td>`;
+			const oneLine = item.body.replace(/\s+/g, ' ').trim();
+			const preview = oneLine.length > 100 ? oneLine.slice(0, 99) + '…' : oneLine;
+			return `<td class="td-desc">${escape(preview)}</td>`;
+		}
+		const value = fields[c.key];
+		if (value === null || value === undefined) return `<td class="td-empty">—</td>`;
+		if (c.isField?.type === 'single_select' && typeof value === 'string') {
+			const toneFor = (v: string): StateTone => {
+				if (c.key === 'state') return args.terminalStates.has(v) ? 'shipped' : stateTone(v);
+				const lc = v.toLowerCase();
+				if (/(p0|critical|urgent|high|red)/.test(lc)) return 'off-track';
+				if (/(p1|medium|orange)/.test(lc)) return 'at-risk';
+				if (/(green|done|low)/.test(lc)) return 'on-track';
+				return 'neutral';
+			};
+			const tone = toneFor(value);
+			// Editable dropdown for the state column when the visitor has edit rights.
+			if (c.key === 'state' && args.can.edit && c.isField.options) {
+				const options = c.isField.options
+					.map(
+						(o) => `<option value="${escape(o)}" data-tone="${toneFor(o)}"${o === value ? ' selected' : ''}>${escape(humanizeState(o))}</option>`,
+					)
+					.join('');
+				return `<td class="td-state"><select class="state-select tone-${tone}" data-item-id="${escape(item.id)}" aria-label="Change state">${options}</select></td>`;
+			}
+			return `<td class="td-select"><span class="tag tone-${tone}">${escape(humanizeState(value))}</span></td>`;
+		}
+		if (c.isField?.type === 'checkbox') return `<td class="td-check">${value ? '✓' : '—'}</td>`;
+		if (Array.isArray(value)) return `<td>${escape(value.join(', '))}</td>`;
+		return `<td>${escape(String(value))}</td>`;
+	}).join('');
+	const summaryRow = `<tr class="item-row ${hasBody ? 'has-detail' : ''}" data-item-id="${escape(item.id)}">${tds}</tr>`;
+	const detailRow = hasBody
+		? `<tr class="detail-row" data-detail-for="${escape(item.id)}"><td colspan="${cols.length}"><div class="detail-body">${escape(item.body)}</div></td></tr>`
+		: '';
+	return summaryRow + detailRow;
+}
+
+// --- Todo view -------------------------------------------------------------
+
+function renderTodoView(args: ViewArgs): string {
+	if (args.items.length === 0) return `<p class="empty">No items in this list yet.</p>`;
+	const ordered = orderItemsByState(args.items, args.stateOrder, args.terminalStates);
+	const stateField = args.stateField;
+	// Toggle target: when checked, transition to the first terminal state; when
+	// unchecked, transition to the first non-terminal state.
+	const toggleTo = (current: string | null): { to: string; done: boolean } | null => {
+		if (!stateField || !stateField.options || stateField.options.length === 0) return null;
+		const terminals = stateField.terminal ?? [];
+		const isDone = current !== null && terminals.includes(current);
+		if (isDone) {
+			const firstOpen = stateField.options.find((o) => !terminals.includes(o));
+			return firstOpen ? { to: firstOpen, done: false } : null;
+		} else {
+			const firstDone = terminals[0] ?? null;
+			return firstDone ? { to: firstDone, done: true } : null;
+		}
+	};
+	const rows = ordered.map((item) => {
+		const fields = item.fields_json as Record<string, unknown>;
+		const state = typeof fields.state === 'string' ? fields.state : null;
+		const isDone = state !== null && args.terminalStates.has(state);
+		const target = toggleTo(state);
+		const canToggle = args.can.edit && target !== null;
+		const checkbox = canToggle
+			? `<form class="todo-toggle" method="POST" action="/r/${escape(args.shareCode)}/state/${escape(item.id)}">
+					<input type="hidden" name="state" value="${escape(target!.to)}" />
+					<button type="submit" class="todo-checkbox ${isDone ? 'checked' : ''}" aria-label="${isDone ? 'Mark not done' : 'Mark done'}">${isDone ? CHECK_ICON : ''}</button>
+				</form>`
+			: `<span class="todo-checkbox static ${isDone ? 'checked' : ''}">${isDone ? CHECK_ICON : ''}</span>`;
+		const tone: StateTone = isDone ? 'shipped' : state ? stateTone(state) : 'neutral';
+		return `
+			<li class="todo-item tone-${tone} ${isDone ? 'is-done' : ''}">
+				${checkbox}
+				<div class="todo-body">
+					<div class="todo-head">
+						<span class="todo-title">${escape(item.title)}</span>
+						<code class="todo-id">${escape(item.id)}</code>
+					</div>
+					${item.body ? `<p class="todo-desc">${escape(truncate(item.body, 200))}</p>` : ''}
+					${state ? `<div class="todo-state">${statusPill(state, tone)}</div>` : ''}
+				</div>
+			</li>
+		`;
+	}).join('');
+	return `<ul class="todo-list">${rows}</ul>`;
+}
+
+// --- Shared helpers --------------------------------------------------------
+
+function orderItemsByState(items: ItemRow[], stateOrder: string[], terminalStates: Set<string>): ItemRow[] {
+	const stateIndex = new Map(stateOrder.map((s, i) => [s, i]));
+	return [...items].sort((a, b) => {
+		const sa = (a.fields_json as Record<string, unknown>).state;
+		const sb = (b.fields_json as Record<string, unknown>).state;
+		const ia = typeof sa === 'string' ? (stateIndex.get(sa) ?? 999) : 1000;
+		const ib = typeof sb === 'string' ? (stateIndex.get(sb) ?? 999) : 1000;
+		// Push terminal states to the bottom for the active view default.
+		const ta = typeof sa === 'string' && terminalStates.has(sa) ? 1 : 0;
+		const tb = typeof sb === 'string' && terminalStates.has(sb) ? 1 : 0;
+		if (ta !== tb) return ta - tb;
+		if (ia !== ib) return ia - ib;
+		return a.id.localeCompare(b.id);
+	});
+}
+
+// === View switcher (segmented control) =====================================
+
+const VIEW_LABELS: Record<ImplementedView, string> = {
+	list: 'List',
+	kanban: 'Board',
+	table: 'Table',
+	todo: 'Todo',
+};
+
+const VIEW_ICONS: Record<ImplementedView, string> = {
+	list: `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 3.5h10M2 7h10M2 10.5h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+	kanban: `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="2.5" height="9" rx="0.5" stroke="currentColor" stroke-width="1.2"/><rect x="5.75" y="2.5" width="2.5" height="6" rx="0.5" stroke="currentColor" stroke-width="1.2"/><rect x="9.5" y="2.5" width="2.5" height="4" rx="0.5" stroke="currentColor" stroke-width="1.2"/></svg>`,
+	table: `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="10" height="9" rx="0.8" stroke="currentColor" stroke-width="1.2"/><path d="M2 5.5h10M2 8.5h10M5.5 5.5v6" stroke="currentColor" stroke-width="1.2"/></svg>`,
+	todo: `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="2" y="3.5" width="2.5" height="2.5" rx="0.4" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="8" width="2.5" height="2.5" rx="0.4" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 4.75l0.6 0.6L4 4.3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 4.75h6M6 9.25h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
+};
+
+function renderViewSwitcher(
+	active: ImplementedView,
+	listDefault: DefaultView | undefined,
+	shareCode: string,
+	canEdit: boolean,
+): string {
+	const buttons = IMPLEMENTED_VIEWS.map((v) => {
+		const isActive = v === active;
+		const isDefault = listDefault === v;
+		return `<a class="view-btn ${isActive ? 'is-active' : ''} ${isDefault ? 'is-default' : ''}" href="?view=${v}" aria-current="${isActive ? 'page' : 'false'}" title="${escape(VIEW_LABELS[v])}${isDefault ? ' (default for this list)' : ''}">
+			${VIEW_ICONS[v]}<span>${escape(VIEW_LABELS[v])}</span>
+		</a>`;
+	}).join('');
+	const setDefault = canEdit && listDefault !== active
+		? `<form class="view-set-default" method="POST" action="/r/${escape(shareCode)}/view-default">
+				<input type="hidden" name="view" value="${active}" />
+				<button type="submit" title="Make ${escape(VIEW_LABELS[active])} the default view for this list">Set as default</button>
+			</form>`
+		: '';
+	return `<div class="view-switcher" role="tablist">${buttons}${setDefault}</div>`;
+}
+
+const SPEECH_ICON = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 3.5h10v5H7l-3 2.5v-2.5H2v-5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+
+function renderExportDropdown(shareCode: string): string {
+	return `
+		<details class="export-dropdown">
+			<summary>
+				${DOWNLOAD_ICON}<span>Export</span>${CHEVRON_DOWN_ICON}
+			</summary>
+			<div class="export-menu" role="menu">
+				<a class="export-menu-item" role="menuitem" href="/r/${escape(shareCode)}/export.csv" download>
+					<span class="ext-tag">CSV</span><span class="ext-name">Comma-separated values</span>
+				</a>
+				<a class="export-menu-item" role="menuitem" href="/r/${escape(shareCode)}/export.md" download>
+					<span class="ext-tag">MD</span><span class="ext-name">Markdown</span>
+				</a>
+				<a class="export-menu-item" role="menuitem" href="/r/${escape(shareCode)}/export.xlsx" download>
+					<span class="ext-tag">XLSX</span><span class="ext-name">Microsoft Excel</span>
+				</a>
+			</div>
+		</details>
 	`;
 }
 
@@ -628,6 +941,257 @@ function escape(s: string): string {
 // glyph constant is no longer needed (kept for the per-item card variants).
 
 const DOWNLOAD_ICON = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M3.5 6.5L7 10l3.5-3.5M2.5 12h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+const CHEVRON_DOWN_ICON = `<svg class="chev" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+const CHECK_ICON = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3 7.5L6 10.5L11 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+// Inline script: dropdown close-on-outside-click, table row expansion, and
+// kanban drag-and-drop with POST-to-redirect on drop. ~70 lines, no library.
+function pageScript(shareCode: string): string {
+	return `<script>
+(function () {
+	var SHARE_CODE = ${JSON.stringify(shareCode)};
+
+	// === Dropdown close-on-outside-click + Escape =========================
+	document.addEventListener('click', function (e) {
+		document.querySelectorAll('details.export-dropdown[open]').forEach(function (d) {
+			if (!d.contains(e.target)) d.removeAttribute('open');
+		});
+	});
+	document.addEventListener('keydown', function (e) {
+		if (e.key === 'Escape') {
+			document.querySelectorAll('details.export-dropdown[open]').forEach(function (d) {
+				d.removeAttribute('open');
+			});
+		}
+	});
+
+	// === Table: click row to expand the description =======================
+	document.querySelectorAll('tr.item-row.has-detail').forEach(function (row) {
+		row.addEventListener('click', function (e) {
+			// Ignore clicks on interactive elements inside the row.
+			if (e.target.closest('a, button, input, select, textarea, form')) return;
+			row.classList.toggle('is-expanded');
+		});
+		row.style.cursor = 'pointer';
+	});
+
+	// === Shared AJAX helper for state changes (table dropdown + todo checkbox)
+	function postStateChange(itemId, newState) {
+		return fetch('/r/' + SHARE_CODE + '/state/' + encodeURIComponent(itemId), {
+			method: 'POST',
+			headers: {
+				'Accept': 'application/json',
+				'Content-Type': 'application/x-www-form-urlencoded',
+			},
+			body: 'state=' + encodeURIComponent(newState),
+		}).then(function (res) {
+			if (!res.ok) throw new Error('HTTP ' + res.status);
+			return res.json();
+		});
+	}
+
+	function flashCell(el) {
+		el.classList.add('is-saved');
+		setTimeout(function () { el.classList.remove('is-saved'); }, 700);
+	}
+
+	// === Table: editable state dropdown (no page reload) ===================
+	var TONE_RX = /tone-[a-z-]+/g;
+	document.querySelectorAll('select.state-select').forEach(function (sel) {
+		var lastValue = sel.value;
+		sel.addEventListener('change', function () {
+			var itemId = sel.dataset.itemId;
+			var newState = sel.value;
+			var opt = sel.options[sel.selectedIndex];
+			var newTone = opt && opt.dataset.tone ? opt.dataset.tone : 'neutral';
+			sel.classList.add('is-pending');
+			sel.disabled = true;
+			postStateChange(itemId, newState)
+				.then(function () {
+					sel.className = sel.className.replace(TONE_RX, '').trim() + ' tone-' + newTone;
+					sel.classList.remove('is-pending');
+					sel.disabled = false;
+					lastValue = newState;
+					flashCell(sel);
+				})
+				.catch(function (err) {
+					console.error('state update failed', err);
+					sel.value = lastValue;
+					sel.classList.remove('is-pending');
+					sel.disabled = false;
+					alert('Could not update state: ' + err.message);
+				});
+		});
+	});
+
+	// === Todo: fetch-based checkbox toggle (no navigation) =================
+	document.querySelectorAll('form.todo-toggle').forEach(function (form) {
+		form.addEventListener('submit', function (e) {
+			e.preventDefault();
+			var input = form.querySelector('input[name="state"]');
+			if (!input) return;
+			var newState = input.value;
+			var item = form.closest('.todo-item');
+			var button = form.querySelector('.todo-checkbox');
+			if (!button) return;
+			var itemId = form.action.split('/').pop();
+			button.disabled = true;
+			button.classList.add('is-pending');
+			postStateChange(decodeURIComponent(itemId), newState)
+				.then(function (data) {
+					if (data.is_terminal) {
+						item.classList.add('is-done');
+						button.classList.add('checked');
+						button.innerHTML = ${JSON.stringify(CHECK_ICON)};
+					} else {
+						item.classList.remove('is-done');
+						button.classList.remove('checked');
+						button.innerHTML = '';
+					}
+					if (data.next_toggle_state) input.value = data.next_toggle_state;
+					button.disabled = false;
+					button.classList.remove('is-pending');
+					flashCell(button);
+				})
+				.catch(function (err) {
+					console.error('todo toggle failed', err);
+					button.disabled = false;
+					button.classList.remove('is-pending');
+					alert('Could not toggle: ' + err.message);
+				});
+		});
+	});
+
+	// === Kanban: drag-and-drop + click-to-expand ===========================
+	var dragging = null;
+	var lastDragEndAt = 0;
+	// Per-column counter tracking how deeply the cursor is nested in the column.
+	// Without this, moving from the column body onto a child card fires
+	// dragleave (target = column) and removes the highlight — only to be
+	// re-added by the next dragover, causing visible flicker.
+	var dragDepth = new WeakMap();
+
+	document.querySelectorAll('.kanban-card').forEach(function (card) {
+		// Click-to-expand: toggle the full body. Suppress if a drag just finished.
+		card.addEventListener('click', function (e) {
+			if (e.target.closest('a, button, input, select, textarea, form')) return;
+			if (Date.now() - lastDragEndAt < 200) return;
+			card.classList.toggle('is-expanded');
+		});
+		if (card.getAttribute('draggable') !== 'true') return;
+		card.addEventListener('dragstart', function (e) {
+			dragging = card.dataset.itemId;
+			card.classList.add('is-dragging');
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('text/plain', dragging || '');
+			}
+		});
+		card.addEventListener('dragend', function () {
+			card.classList.remove('is-dragging');
+			dragging = null;
+			lastDragEndAt = Date.now();
+			document.querySelectorAll('.kanban-col.is-drop-target').forEach(function (c) {
+				c.classList.remove('is-drop-target');
+				dragDepth.set(c, 0);
+			});
+		});
+	});
+
+	document.querySelectorAll('.kanban-col[data-state]').forEach(function (col) {
+		col.addEventListener('dragenter', function (e) {
+			if (!dragging) return;
+			e.preventDefault();
+			var d = (dragDepth.get(col) || 0) + 1;
+			dragDepth.set(col, d);
+			col.classList.add('is-drop-target');
+		});
+		col.addEventListener('dragover', function (e) {
+			if (!dragging) return;
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		});
+		col.addEventListener('dragleave', function () {
+			var d = (dragDepth.get(col) || 1) - 1;
+			dragDepth.set(col, d);
+			if (d <= 0) {
+				dragDepth.set(col, 0);
+				col.classList.remove('is-drop-target');
+			}
+		});
+		col.addEventListener('drop', function (e) {
+			e.preventDefault();
+			dragDepth.set(col, 0);
+			col.classList.remove('is-drop-target');
+			if (!dragging) return;
+			var itemId = dragging;
+			var newState = col.dataset.state;
+			var newTone = col.dataset.tone || 'neutral';
+			var card = document.querySelector('.kanban-card[data-item-id="' + (window.CSS && CSS.escape ? CSS.escape(itemId) : itemId) + '"]');
+			if (!card) return;
+			var oldCol = card.closest('.kanban-col');
+			if (oldCol === col) return; // dropped back into the same column — nothing to do
+
+			var newCardsContainer = col.querySelector('.kanban-col-cards');
+			var oldCardsContainer = oldCol.querySelector('.kanban-col-cards');
+			var oldTone = oldCol.dataset.tone || 'neutral';
+			var oldNextSibling = card.nextElementSibling;
+			var newCountEl = col.querySelector('.kanban-col-count');
+			var oldCountEl = oldCol.querySelector('.kanban-col-count');
+
+			// === Optimistic move ===
+			var TONE_RX = /tone-[a-z-]+/g;
+			card.className = card.className.replace(TONE_RX, '').trim() + ' tone-' + newTone;
+			card.classList.add('is-pending');
+			var existingPh = newCardsContainer.querySelector('.kanban-empty');
+			if (existingPh) existingPh.remove();
+			newCardsContainer.appendChild(card);
+			if (newCountEl) newCountEl.textContent = String((parseInt(newCountEl.textContent, 10) || 0) + 1);
+			if (oldCountEl) oldCountEl.textContent = String(Math.max(0, (parseInt(oldCountEl.textContent, 10) || 0) - 1));
+			if (oldCardsContainer.children.length === 0) {
+				var ph = document.createElement('div');
+				ph.className = 'kanban-empty';
+				ph.textContent = '—';
+				oldCardsContainer.appendChild(ph);
+			}
+
+			postStateChange(itemId, newState)
+				.then(function () {
+					card.classList.remove('is-pending');
+					flashCell(card);
+				})
+				.catch(function (err) {
+					// Revert tone
+					card.className = card.className.replace(TONE_RX, '').trim() + ' tone-' + oldTone;
+					card.classList.remove('is-pending');
+					// Revert position
+					var ph2 = oldCardsContainer.querySelector('.kanban-empty');
+					if (ph2) ph2.remove();
+					if (oldNextSibling && oldNextSibling.parentNode === oldCardsContainer) {
+						oldCardsContainer.insertBefore(card, oldNextSibling);
+					} else {
+						oldCardsContainer.appendChild(card);
+					}
+					// Re-add placeholder to target if it's empty
+					if (newCardsContainer.children.length === 0) {
+						var newPh = document.createElement('div');
+						newPh.className = 'kanban-empty';
+						newPh.textContent = '—';
+						newCardsContainer.appendChild(newPh);
+					}
+					// Revert counts
+					if (newCountEl) newCountEl.textContent = String(Math.max(0, (parseInt(newCountEl.textContent, 10) || 0) - 1));
+					if (oldCountEl) oldCountEl.textContent = String((parseInt(oldCountEl.textContent, 10) || 0) + 1);
+					console.error('kanban drop failed', err);
+					alert('Could not move card: ' + err.message);
+				});
+		});
+	});
+})();
+</script>`;
+}
 
 function DIAMOND_SVG_LARGE(tone: StateTone): string {
 	return `<svg class="hero-diamond tone-${tone}" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 4l20 20-20 20L4 24 24 4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M24 14l10 10-10 10-10-10 10-10z" fill="currentColor" fill-opacity="0.15"/></svg>`;
@@ -860,8 +1424,255 @@ main {
 .detail-block .id { color: var(--fg-4); min-width: 60px; }
 .detail-block .t { color: var(--fg-2); }
 
-/* === Items === */
+/* === Items: list view (default) === */
 .items { display: flex; flex-direction: column; gap: var(--space-7); }
+.items-view-kanban, .items-view-table, .items-view-todo { display: block; gap: 0; }
+
+/* === Kanban view === */
+.kanban-board {
+	display: flex;
+	gap: var(--space-3);
+	overflow-x: auto;
+	scroll-snap-type: x proximity;
+	padding-bottom: var(--space-3);
+	margin-bottom: var(--space-3);
+}
+.kanban-col {
+	flex: 0 0 280px;
+	min-width: 280px;
+	scroll-snap-align: start;
+	background: var(--bg-1);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: var(--space-3);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+.kanban-col-header { display: flex; align-items: center; justify-content: space-between; }
+.kanban-col-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
+.kanban-col-cards { display: flex; flex-direction: column; gap: var(--space-2); min-height: 40px; }
+.kanban-empty { color: var(--fg-4); font-size: 12px; font-style: italic; padding: var(--space-2); text-align: center; }
+.kanban-card {
+	background: var(--bg-2);
+	border: 1px solid var(--border-bright);
+	border-left-width: 3px;
+	border-radius: 8px;
+	padding: var(--space-3);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	transition: border-color 0.15s, transform 0.15s;
+	cursor: default;
+}
+.kanban-card:hover { border-color: var(--fg-4); transform: translateY(-1px); }
+.kanban-card.tone-shipped { border-left-color: var(--shipped); }
+.kanban-card.tone-on-track { border-left-color: var(--on-track); }
+.kanban-card.tone-at-risk { border-left-color: var(--at-risk); }
+.kanban-card.tone-off-track { border-left-color: var(--off-track); }
+.kanban-card.tone-pending, .kanban-card.tone-neutral { border-left-color: var(--fg-4); }
+.kanban-card-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
+.kanban-card-id { color: var(--fg-4); font-family: var(--font-mono); }
+.kanban-card-comments { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); }
+.kanban-card-comments svg { width: 11px; height: 11px; }
+.kanban-card-title { font-size: 13.5px; color: var(--fg); font-weight: 500; line-height: 1.4; }
+.kanban-card-desc {
+	font-size: 12.5px;
+	color: var(--fg-3);
+	line-height: 1.5;
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.kanban-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.kanban-card-chips .chip { font-size: 10.5px; padding: 1px 6px; }
+
+/* Card interactions */
+.kanban-card {
+	cursor: pointer;
+	transition: border-color 0.15s, transform 0.15s, opacity 0.18s, box-shadow 0.3s;
+}
+.kanban-card[draggable="true"] { cursor: grab; }
+.kanban-card.is-dragging { opacity: 0.4; cursor: grabbing; }
+.kanban-card.is-pending { opacity: 0.55; }
+.kanban-card.is-saved { animation: pulse-accent 0.6s ease; }
+
+/* Click-to-expand: remove the body line-clamp + show full chips */
+.kanban-card.is-expanded .kanban-card-desc {
+	-webkit-line-clamp: unset;
+	display: block;
+	white-space: pre-wrap;
+}
+
+/* Drop target highlight — outline + background only (no layout-affecting
+   pseudo-element, which previously caused flicker as the column resized). */
+.kanban-col {
+	transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.kanban-col.is-drop-target {
+	background: rgba(167, 139, 250, 0.06);
+	border-color: var(--accent);
+	box-shadow: 0 0 0 1px var(--accent-glow), inset 0 0 20px -8px var(--accent-glow);
+}
+
+/* === Table view === */
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-1); }
+.items-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
+.items-table thead th {
+	text-align: left;
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--fg-3);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	padding: var(--space-3) var(--space-4);
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-1);
+	position: sticky; top: 0; z-index: 2;
+}
+.items-table tbody td {
+	padding: 11px var(--space-4);
+	border-bottom: 1px solid var(--border);
+	color: var(--fg-2);
+	vertical-align: middle;
+}
+.items-table tbody tr:last-child td { border-bottom: none; }
+.items-table tbody tr:hover { background: var(--bg-2); }
+.items-table .td-id code { color: var(--fg-4); }
+.items-table .td-title { color: var(--fg); font-weight: 500; }
+.items-table .td-empty { color: var(--fg-4); }
+.items-table .td-check { color: var(--shipped); }
+.items-table .th-_expand, .items-table .td-expand { width: 28px; padding-left: var(--space-3); padding-right: 0; }
+.items-table .td-expand svg { width: 11px; height: 11px; color: var(--fg-4); transition: transform 0.15s; }
+.items-table tr.item-row.is-expanded .td-expand svg { transform: rotate(180deg); color: var(--accent); }
+.items-table .th-_description, .items-table .td-desc {
+	color: var(--fg-3);
+	max-width: 340px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.items-table .item-row.is-expanded { background: var(--bg-2); }
+.items-table .detail-row { display: none; }
+.items-table .item-row.is-expanded + .detail-row { display: table-row; }
+.items-table .detail-row td {
+	padding: 0;
+	background: var(--bg-2);
+	border-bottom: 1px solid var(--border);
+}
+.items-table .detail-body {
+	padding: var(--space-3) var(--space-4) var(--space-4) calc(var(--space-3) + 28px);
+	color: var(--fg-2);
+	font-size: 13px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	border-left: 2px solid var(--accent);
+	margin-left: var(--space-4);
+}
+.items-table .tag,
+.items-table .state-select {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 500;
+	background: var(--bg-2);
+	border: 1px solid var(--border);
+}
+.items-table .state-select {
+	font-family: var(--font-sans);
+	cursor: pointer;
+	appearance: none;
+	-webkit-appearance: none;
+	padding: 2px 22px 2px 8px;
+	background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+	background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+	background-size: 4px 4px;
+	background-repeat: no-repeat;
+	transition: filter 0.12s ease, opacity 0.12s ease;
+}
+.items-table .state-select:hover { filter: brightness(1.1); }
+.items-table .state-select:focus { outline: 1px solid currentColor; outline-offset: 1px; }
+.items-table .state-select.is-pending { opacity: 0.5; cursor: progress; }
+.items-table .state-select option { background: var(--bg-elev); color: var(--fg); font-family: var(--font-sans); }
+.items-table .tag.tone-shipped,
+.items-table .state-select.tone-shipped { color: var(--shipped); background: rgba(76, 183, 130, 0.08); border-color: rgba(76, 183, 130, 0.3); }
+.items-table .tag.tone-on-track,
+.items-table .state-select.tone-on-track { color: var(--on-track); background: rgba(76, 183, 130, 0.06); border-color: rgba(76, 183, 130, 0.25); }
+.items-table .tag.tone-at-risk,
+.items-table .state-select.tone-at-risk { color: var(--at-risk); background: rgba(212, 160, 23, 0.06); border-color: rgba(212, 160, 23, 0.25); }
+.items-table .tag.tone-off-track,
+.items-table .state-select.tone-off-track { color: var(--off-track); background: rgba(229, 72, 77, 0.06); border-color: rgba(229, 72, 77, 0.25); }
+.items-table .tag.tone-pending,
+.items-table .state-select.tone-pending,
+.items-table .tag.tone-neutral,
+.items-table .state-select.tone-neutral { color: var(--fg-3); }
+
+/* === Todo view === */
+.todo-list {
+	list-style: none;
+	background: var(--bg-1);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	overflow: hidden;
+}
+.todo-item {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border-bottom: 1px solid var(--border);
+	transition: background 0.12s;
+}
+.todo-item:last-child { border-bottom: none; }
+.todo-item:hover { background: var(--bg-2); }
+.todo-toggle { margin-top: 2px; }
+.todo-checkbox {
+	width: 18px; height: 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 1.5px solid var(--fg-4);
+	border-radius: 4px;
+	color: var(--shipped);
+	cursor: pointer;
+	padding: 0;
+	transition: border-color 0.15s, background 0.15s;
+}
+.todo-checkbox svg { width: 12px; height: 12px; }
+.todo-checkbox:hover { border-color: var(--shipped); background: rgba(76, 183, 130, 0.06); }
+.todo-checkbox.checked {
+	background: rgba(76, 183, 130, 0.15);
+	border-color: var(--shipped);
+}
+.todo-checkbox.static { cursor: default; }
+.todo-checkbox.is-pending { opacity: 0.5; cursor: progress; }
+.todo-checkbox.is-saved,
+.items-table .state-select.is-saved {
+	animation: pulse-accent 0.6s ease;
+}
+@keyframes pulse-accent {
+	0% { box-shadow: 0 0 0 0 var(--accent-glow); }
+	40% { box-shadow: 0 0 0 6px var(--accent-glow); }
+	100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+}
+.todo-body { flex: 1; min-width: 0; }
+.todo-head { display: flex; align-items: center; gap: var(--space-2); }
+.todo-title { color: var(--fg); font-weight: 500; font-size: 14px; }
+.todo-id { color: var(--fg-4); font-size: 11px; }
+.todo-item.is-done .todo-title { text-decoration: line-through; color: var(--fg-3); }
+.todo-item.is-done .todo-desc { color: var(--fg-4); }
+.todo-desc { color: var(--fg-3); font-size: 13px; margin-top: 2px; line-height: 1.5; }
+.todo-state { margin-top: 6px; }
+
+@media (max-width: 700px) {
+	.view-switcher .view-btn span { display: none; }
+	.view-set-default { width: 100%; margin-left: 0; margin-top: var(--space-2); }
+	.kanban-col { flex-basis: 240px; min-width: 240px; }
+}
 
 .group-header {
 	display: flex; align-items: center; gap: var(--space-3);
@@ -968,98 +1779,220 @@ footer code { color: var(--fg-2); }
 footer .dot { display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: var(--fg-4); margin: 0 var(--space-2); vertical-align: middle; }
 footer .links { display: flex; gap: var(--space-4); }
 
-/* === Top unified action bar: capabilities + export + sign-as === */
-.action-bar {
-	display: flex;
-	flex-direction: column;
-	gap: var(--space-3);
-	margin-bottom: var(--space-6);
-	padding: var(--space-4) var(--space-5);
-	background: var(--bg-1);
-	border: 1px solid var(--border);
-	border-radius: 12px;
-}
-.action-bar-row {
-	display: flex;
-	flex-wrap: wrap;
+/* === Header capabilities (top bar, right side) === */
+.header-meta {
+	display: inline-flex;
 	align-items: center;
 	gap: var(--space-4);
-}
-/* Identity row: caps on the left, sign-as pushed to the right. */
-.identity-row { justify-content: space-between; }
-/* Actions row: dim separator above, slightly less prominent vertical rhythm. */
-.identity-row + .actions-row {
-	padding-top: var(--space-3);
-	border-top: 1px solid var(--border);
-}
-.action-group {
-	display: inline-flex;
 	flex-wrap: wrap;
-	align-items: center;
-	gap: 8px;
+	justify-content: flex-end;
 }
-.action-group-label {
-	font-size: 11px;
-	font-weight: 600;
-	color: var(--fg-3);
-	text-transform: uppercase;
-	letter-spacing: 0.06em;
-	margin-right: 6px;
-}
-.action-btn {
+.header-caps {
 	display: inline-flex;
 	align-items: center;
-	gap: 8px;
-	padding: 7px 14px;
-	background: var(--bg-2);
-	border: 1px solid var(--border-bright);
-	border-radius: 8px;
-	color: var(--fg-2);
-	font-size: 13px;
-	font-weight: 500;
-	transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s;
+	gap: 6px;
+	flex-wrap: wrap;
 }
-.action-btn:hover {
-	color: var(--accent);
-	border-color: var(--accent);
-	background: rgba(167, 139, 250, 0.06);
-	transform: translateY(-1px);
+.header-caps-label {
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--fg-4);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	margin-right: 2px;
 }
-.action-btn svg { width: 13px; height: 13px; opacity: 0.85; }
-.action-btn:hover svg { opacity: 1; }
-
-/* Sign-as inline form inside the bar */
-.action-group-signas input,
-.action-group-signas button {
+.header-signas {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: 6px;
+}
+.header-signas input {
 	font: inherit;
 	font-family: var(--font-sans);
-	padding: 6px 10px;
-	background: var(--bg-2);
+	padding: 4px 10px;
+	background: var(--bg-1);
 	border: 1px solid var(--border);
-	border-radius: 6px;
+	border-radius: 999px;
 	color: var(--fg);
 	font-size: 12px;
+	width: 130px;
+	transition: width 0.15s ease, border-color 0.15s ease;
 }
-.action-group-signas input:focus {
+.header-signas input:focus {
 	outline: none;
+	width: 180px;
 	border-color: var(--accent);
 	box-shadow: 0 0 0 1px var(--accent-glow);
 }
-.action-group-signas button {
+.header-signas button {
+	font: inherit;
 	cursor: pointer;
-	background: var(--bg-elev);
-	transition: background 0.15s, color 0.15s;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	color: var(--fg-3);
+	transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.action-group-signas button:hover { background: var(--border-bright); color: var(--accent); }
+.header-signas button:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: rgba(167, 139, 250, 0.06);
+}
+.header-signas button svg { width: 12px; height: 12px; }
+
+/* === Hero meta row: list metadata + view switcher + export dropdown === */
+.hero-meta-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: var(--space-6);
+}
+.hero-meta-row .hero-meta { margin-bottom: 0; flex: 1; min-width: 0; }
+.hero-controls { display: inline-flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+
+/* === View switcher (segmented control) === */
+.view-switcher {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	padding: 3px;
+	background: var(--bg-1);
+	border: 1px solid var(--border-bright);
+	border-radius: 999px;
+}
+.view-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 11px;
+	border-radius: 999px;
+	color: var(--fg-3);
+	font-size: 12.5px;
+	font-weight: 500;
+	transition: color 0.15s, background 0.15s;
+}
+.view-btn svg { width: 13px; height: 13px; opacity: 0.85; }
+.view-btn:hover { color: var(--fg); background: var(--bg-2); }
+.view-btn.is-active {
+	color: var(--accent);
+	background: rgba(167, 139, 250, 0.08);
+}
+.view-btn.is-active svg { opacity: 1; }
+.view-btn.is-default::after {
+	content: '';
+	display: inline-block;
+	width: 4px; height: 4px;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: 0.55;
+	margin-left: 2px;
+}
+.view-set-default { display: inline-flex; align-items: center; margin-left: 4px; }
+.view-set-default button {
+	font: inherit;
+	cursor: pointer;
+	padding: 5px 11px;
+	background: transparent;
+	border: 1px dashed var(--border-bright);
+	border-radius: 999px;
+	color: var(--fg-3);
+	font-size: 11.5px;
+	font-weight: 500;
+	transition: color 0.15s, border-color 0.15s;
+}
+.view-set-default button:hover { color: var(--accent); border-color: var(--accent); }
+
+/* === Export dropdown === */
+.export-dropdown { position: relative; }
+.export-dropdown summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 12px 7px 14px;
+	background: var(--bg-1);
+	border: 1px solid var(--border-bright);
+	border-radius: 999px;
+	color: var(--fg-2);
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	list-style: none;
+	transition: border-color 0.15s, color 0.15s, background 0.15s;
+	user-select: none;
+}
+.export-dropdown summary::-webkit-details-marker { display: none; }
+.export-dropdown summary:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: rgba(167, 139, 250, 0.06);
+}
+.export-dropdown summary svg { width: 13px; height: 13px; opacity: 0.85; }
+.export-dropdown summary .chev { width: 11px; height: 11px; transition: transform 0.18s ease; opacity: 0.65; }
+.export-dropdown[open] summary {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: rgba(167, 139, 250, 0.08);
+}
+.export-dropdown[open] summary .chev { transform: rotate(180deg); }
+.export-menu {
+	position: absolute;
+	top: calc(100% + 8px);
+	right: 0;
+	min-width: 240px;
+	padding: 6px;
+	background: var(--bg-elev);
+	border: 1px solid var(--border-bright);
+	border-radius: 10px;
+	box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--bg-0);
+	z-index: 20;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.export-menu-item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: 8px 12px;
+	border-radius: 6px;
+	color: var(--fg-2);
+	font-size: 13px;
+	transition: background 0.12s, color 0.12s;
+}
+.export-menu-item:hover { background: var(--bg-2); color: var(--fg); }
+.export-menu-item .ext-tag {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 600;
+	padding: 2px 6px;
+	background: var(--bg-2);
+	border-radius: 4px;
+	color: var(--fg-3);
+	letter-spacing: 0.04em;
+}
+.export-menu-item:hover .ext-tag { color: var(--accent); background: rgba(167, 139, 250, 0.1); }
+.export-menu-item .ext-name { font-size: 13px; }
+
+/* Click-outside-to-close is handled by a tiny inline <script> at the bottom
+   of the body — see CLOSE_ON_OUTSIDE_CLICK_SCRIPT below. Native <details>
+   doesn't auto-close, so JS is required. */
 
 @media (max-width: 700px) {
-	.action-bar { padding: var(--space-3) var(--space-4); }
-	.identity-row { flex-direction: column; align-items: flex-start; gap: var(--space-3); }
-	.action-group { width: 100%; }
-	.action-group-signas { justify-content: flex-start; }
-	.action-group-signas input { flex: 1; min-width: 0; }
-	.action-btn { padding: 6px 12px; font-size: 12px; }
-	.action-group-export .action-btn { flex: 1; justify-content: center; min-width: 70px; }
+	header { flex-wrap: wrap; gap: var(--space-3); }
+	.header-meta { width: 100%; justify-content: flex-start; }
+	.header-signas input { width: 110px; }
+	.header-signas input:focus { width: 140px; }
+	.hero-meta-row { flex-direction: column; align-items: flex-start; }
+	.export-menu { right: auto; left: 0; }
 }
 
 /* === Flash messages === */

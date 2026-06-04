@@ -134,7 +134,7 @@ export type FieldDef = {
 	description?: string;
 };
 
-export type DefaultView = 'table' | 'kanban' | 'calendar' | 'compass';
+export type DefaultView = 'list' | 'kanban' | 'table' | 'todo' | 'calendar' | 'compass';
 
 export const templates = sqliteTable(
 	'templates',
@@ -151,11 +151,11 @@ export const templates = sqliteTable(
 			.notNull()
 			.default(sql`'[]'`),
 		default_view: text('default_view', {
-			enum: ['table', 'kanban', 'calendar', 'compass'],
+			enum: ['list', 'kanban', 'table', 'todo', 'calendar', 'compass'],
 		})
 			.$type<DefaultView>()
 			.notNull()
-			.default('table'),
+			.default('list'),
 		is_system: integer('is_system', { mode: 'boolean' }).notNull().default(false),
 		created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
 		...timestamps,
@@ -183,6 +183,8 @@ export type ListMeta = {
 	// invite-list specific
 	event_date?: string;
 	venue?: string;
+	// per-list default view override (wins over template.default_view)
+	default_view?: DefaultView;
 	// free-form
 	[key: string]: unknown;
 };

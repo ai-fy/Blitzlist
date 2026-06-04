@@ -423,6 +423,13 @@ defaultApp.get('/r/:code', async (c) => {
 			? { kind: flashKind as 'ok' | 'error', message: flashMsg }
 			: undefined;
 
+	// Visitor-side view override via ?view=...
+	const rawView = c.req.query('view');
+	const validViews = ['list', 'kanban', 'table', 'todo', 'calendar', 'compass'] as const;
+	const view_override = rawView && (validViews as readonly string[]).includes(rawView)
+		? (rawView as (typeof validViews)[number])
+		: undefined;
+
 	// Bump use_count fire-and-forget.
 	c.executionCtx.waitUntil(
 		db
@@ -442,6 +449,7 @@ defaultApp.get('/r/:code', async (c) => {
 		permissions,
 		display_name: displayName,
 		flash,
+		view_override,
 	});
 
 	return new Response(html, {
@@ -502,8 +510,32 @@ function setDisplayNameCookieHeader(name: string | null): string {
 	return `blz_name=${encoded}; Path=/; Max-Age=7776000; SameSite=Lax; Secure`;
 }
 
-function redirectToRoadmap(code: string, flash?: { kind: 'ok' | 'error'; message: string }, setCookie?: string) {
+const VALID_VIEW_NAMES = ['list', 'kanban', 'table', 'todo', 'calendar', 'compass'];
+
+/**
+ * Extract the ?view=... value from a request's Referer header so we can
+ * preserve the user's chosen view through POST→303 redirects. Used by every
+ * form/interaction on the /r/<code> page.
+ */
+function viewFromReferer(referer: string | undefined): string | undefined {
+	if (!referer) return undefined;
+	try {
+		const v = new URL(referer).searchParams.get('view');
+		if (v && VALID_VIEW_NAMES.includes(v)) return v;
+	} catch {
+		/* ignore malformed */
+	}
+	return undefined;
+}
+
+function redirectToRoadmap(
+	code: string,
+	flash?: { kind: 'ok' | 'error'; message: string },
+	setCookie?: string,
+	view?: string,
+) {
 	const u = new URL(`https://mcp.blitzlist.ai/r/${code}`);
+	if (view && VALID_VIEW_NAMES.includes(view)) u.searchParams.set('view', view);
 	if (flash) {
 		u.searchParams.set('flash', flash.kind);
 		u.searchParams.set('msg', flash.message);
@@ -627,17 +659,20 @@ defaultApp.post('/r/:code/identify', async (c) => {
 	const sc = await loadShareCode(getDb(c.env), code);
 	if (!sc) return c.html(renderError('Link unavailable', 'This share link is invalid, expired, or revoked.'), 404);
 
+	const view = viewFromReferer(c.req.header('referer'));
 	const form = await readForm(c.req.raw);
 	const name = (form.get('display_name') ?? '').trim().slice(0, 40);
 	return redirectToRoadmap(
 		sc.code,
 		name ? { kind: 'ok', message: `Signed in as ${name}.` } : undefined,
 		setDisplayNameCookieHeader(name || null),
+		view,
 	);
 });
 
 defaultApp.post('/r/:code/comment/:item_id', async (c) => {
 	const db = getDb(c.env);
+	const view = viewFromReferer(c.req.header('referer'));
 	const code = c.req.param('code');
 	const itemId = c.req.param('item_id');
 	const sc = await loadShareCode(db, code);
@@ -645,14 +680,14 @@ defaultApp.post('/r/:code/comment/:item_id', async (c) => {
 
 	const permissions = sc.permissions_json as StakeholderPermission[];
 	if (!permissions.includes('comment')) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code is read-only.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code is read-only.' }, undefined, view);
 	}
 
 	const form = await readForm(c.req.raw);
 	const body = (form.get('body') ?? '').trim().slice(0, 10_000);
 	const displayName = (form.get('display_name') ?? '').trim().slice(0, 40);
 	if (body.length === 0) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Comment cannot be empty.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Comment cannot be empty.' }, undefined, view);
 	}
 
 	// Scope check — confirm the item is in scope.
@@ -664,7 +699,7 @@ defaultApp.post('/r/:code/comment/:item_id', async (c) => {
 		.where(eq(schema.item_lists.item_id, itemId));
 	const itemListIds = memberRows.map((m) => m.list_id);
 	if (allowed !== null && !itemListIds.some((lid) => allowed.includes(lid))) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item is not in this share scope.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item is not in this share scope.' }, undefined, view);
 	}
 
 	// Verify the item exists in this workspace.
@@ -676,7 +711,7 @@ defaultApp.post('/r/:code/comment/:item_id', async (c) => {
 			.limit(1)
 	)[0];
 	if (!itemRow) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item not found.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item not found.' }, undefined, view);
 	}
 
 	const now = new Date();
@@ -721,6 +756,7 @@ defaultApp.post('/r/:code/comment/:item_id', async (c) => {
 
 defaultApp.post('/r/:code/state/:item_id', async (c) => {
 	const db = getDb(c.env);
+	const view = viewFromReferer(c.req.header('referer'));
 	const code = c.req.param('code');
 	const itemId = c.req.param('item_id');
 	const sc = await loadShareCode(db, code);
@@ -728,13 +764,13 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 
 	const permissions = sc.permissions_json as StakeholderPermission[];
 	if (!permissions.includes('edit')) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code does not grant edit rights.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code does not grant edit rights.' }, undefined, view);
 	}
 
 	const form = await readForm(c.req.raw);
 	const newState = (form.get('state') ?? '').trim();
 	if (newState.length === 0) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'No state provided.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'No state provided.' }, undefined, view);
 	}
 
 	// Load item + scope + template.
@@ -746,7 +782,7 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 			.limit(1)
 	)[0];
 	if (!itemRow) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item not found.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item not found.' }, undefined, view);
 	}
 	const scope = sc.scope_json as StakeholderScope;
 	const allowed = await resolveAllowedListIds(db, sc.workspace_id, scope);
@@ -756,10 +792,10 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 		.where(eq(schema.item_lists.item_id, itemId));
 	const itemListIds = memberRows.map((m) => m.list_id);
 	if (allowed !== null && !itemListIds.some((lid) => allowed.includes(lid))) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item is not in this share scope.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item is not in this share scope.' }, undefined, view);
 	}
 	if (!itemRow.template_id) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item has no template — state cannot be validated.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item has no template — state cannot be validated.' }, undefined, view);
 	}
 	const templateRow = (
 		await db
@@ -769,11 +805,11 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 			.limit(1)
 	)[0];
 	if (!templateRow) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item template missing.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Item template missing.' }, undefined, view);
 	}
 	const stateField = findStateFieldDef(templateRow.fields_schema_json as FieldDef[]);
 	if (!stateField) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Template has no state field.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Template has no state field.' }, undefined, view);
 	}
 	try {
 		validateFieldValue(stateField, newState);
@@ -781,7 +817,7 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 		return redirectToRoadmap(sc.code, {
 			kind: 'error',
 			message: err instanceof Error ? err.message : 'State validation failed.',
-		});
+		}, undefined, view);
 	}
 
 	const current = itemRow.fields_json as Record<string, unknown>;
@@ -818,21 +854,93 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 			.set({ last_used_at: now, use_count: sql`use_count + 1` })
 			.where(eq(schema.share_codes.code, sc.code)),
 	);
+
+	// AJAX branch: return JSON for fetch-based callers (table dropdown,
+	// todo checkbox) so the page doesn't reload. Detected via Accept header.
+	if ((c.req.header('accept') ?? '').includes('application/json')) {
+		const terminals = stateField.terminal ?? [];
+		const isTerminal = terminals.includes(newState);
+		const options = stateField.options ?? [];
+		const nextToggleState = isTerminal
+			? (options.find((o) => !terminals.includes(o)) ?? null)
+			: (terminals[0] ?? null);
+		return c.json({
+			ok: true,
+			id: itemId,
+			field_key: stateField.key,
+			from: prev,
+			to: newState,
+			no_op: isNoOp,
+			is_terminal: isTerminal,
+			next_toggle_state: nextToggleState,
+		});
+	}
+
 	return redirectToRoadmap(sc.code, {
 		kind: 'ok',
 		message: isNoOp ? 'State unchanged.' : `State → ${newState}.`,
+	}, undefined, view);
+});
+
+defaultApp.post('/r/:code/view-default', async (c) => {
+	const db = getDb(c.env);
+	const view = viewFromReferer(c.req.header('referer'));
+	const sc = await loadShareCode(db, c.req.param('code'));
+	if (!sc) return c.html(renderError('Link unavailable', 'This share link is invalid, expired, or revoked.'), 404);
+	const permissions = sc.permissions_json as StakeholderPermission[];
+	if (!permissions.includes('edit')) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code does not grant edit rights.' }, undefined, view);
+	}
+	const form = await readForm(c.req.raw);
+	const newView = (form.get('view') ?? '').trim();
+	const validViews = ['list', 'kanban', 'table', 'todo', 'calendar', 'compass'];
+	if (!validViews.includes(newView)) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: `Invalid view "${newView}".` }, undefined, view);
+	}
+
+	// Find the list in scope.
+	const data = await loadExportData(db, sc); // reuses the same scope resolver
+	if (!data) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'No list in scope to update.' }, undefined, view);
+	}
+
+	const meta = (data.list.meta_json ?? {}) as Record<string, unknown>;
+	const newMeta = { ...meta, default_view: newView };
+	const now = new Date();
+	await db
+		.update(schema.lists)
+		.set({ meta_json: newMeta as typeof schema.lists.$inferInsert.meta_json, updated_at: now })
+		.where(eq(schema.lists.id, data.list.id));
+
+	await db.insert(schema.activity_log).values({
+		id: uuid(),
+		workspace_id: sc.workspace_id,
+		item_id: null,
+		actor_id: null,
+		action: 'list.created', // closest existing action; an item.field_changed-style 'list.view_changed' would need a schema add
+		details_json: {
+			via: 'web',
+			actor: { type: 'share_code', code: sc.code },
+			list_id: data.list.id,
+			default_view: newView,
+			note: 'default view changed',
+		},
+		created_at: now,
 	});
+
+	return redirectToRoadmap(sc.code, { kind: 'ok', message: `Default view set to ${newView}.` }, undefined, newView);
 });
 
 defaultApp.post('/r/:code/new-item', async (c) => {
 	const db = getDb(c.env);
+	const view = viewFromReferer(c.req.header('referer'));
 	const code = c.req.param('code');
 	const sc = await loadShareCode(db, code);
 	if (!sc) return c.html(renderError('Link unavailable', 'This share link is invalid, expired, or revoked.'), 404);
 
 	const permissions = sc.permissions_json as StakeholderPermission[];
 	if (!permissions.includes('create')) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code does not grant create rights.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code does not grant create rights.' }, undefined, view);
 	}
 
 	const form = await readForm(c.req.raw);
@@ -842,7 +950,7 @@ defaultApp.post('/r/:code/new-item', async (c) => {
 	const displayName = (form.get('display_name') ?? '').trim().slice(0, 40);
 
 	if (title.length === 0) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Title is required.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Title is required.' }, undefined, view);
 	}
 
 	// Use the first list in scope (matches GET-side behavior).
@@ -859,14 +967,14 @@ defaultApp.post('/r/:code/new-item', async (c) => {
 		targetListId = lr[0]?.id ?? null;
 	}
 	if (!targetListId) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'No list in scope to add to.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'No list in scope to add to.' }, undefined, view);
 	}
 
 	const listRow = (
 		await db.select().from(schema.lists).where(eq(schema.lists.id, targetListId)).limit(1)
 	)[0];
 	if (!listRow) {
-		return redirectToRoadmap(sc.code, { kind: 'error', message: 'List not found.' });
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'List not found.' }, undefined, view);
 	}
 
 	// Resolve template + initial fields.
@@ -903,7 +1011,7 @@ defaultApp.post('/r/:code/new-item', async (c) => {
 				return redirectToRoadmap(sc.code, {
 					kind: 'error',
 					message: err instanceof Error ? err.message : 'Field validation failed.',
-				});
+				}, undefined, view);
 			}
 		}
 	}
