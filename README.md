@@ -3,6 +3,13 @@
 > **The list for the AI era.**
 > Shared memory for hybrid human–agent teams. AI-first. MCP-native. Open-source. Self-hostable on Cloudflare in three minutes.
 
+[![License: AGPL-3.0 + commercial](https://img.shields.io/badge/license-AGPL--3.0%20%2B%20commercial-blueviolet)](./LICENSE)
+[![Status: v0.5 shipping](https://img.shields.io/badge/status-v0.5%20shipping-4cb782)](https://github.com/ai-fy/Blitzlist)
+[![MCP: 23 tools](https://img.shields.io/badge/MCP-23%20tools-a78bfa)](https://mcp.blitzlist.ai/mcp)
+[![Stack: Cloudflare Workers](https://img.shields.io/badge/stack-Cloudflare%20Workers-f48120)](https://workers.cloudflare.com/)
+
+🌐 **Try it:** [blitzlist.ai](https://blitzlist.ai) · 🔌 **MCP install:** `https://mcp.blitzlist.ai/mcp`
+
 ---
 
 Lists drive how we work and how we live — in boardrooms, in startups, in family kitchens, in Claude Code sessions, in sprint plans, in grocery shopping. But the AI era arrived without one.
@@ -15,11 +22,18 @@ Your Claude Code todos die in 24 hours. Notion was built before AI existed. Line
 
 ## Status
 
-**Pre-launch (v0.1 spike in progress).** The architecture, data model, MCP tool surface, and product backlog are all designed and public — see [ARCHITECTURE.md](./ARCHITECTURE.md) and [blitzlist/](./blitzlist/). Code shipping over the coming weeks.
+**v0.5 shipping now.** The hosted MCP server is live at **`https://mcp.blitzlist.ai/mcp`** with 23 annotated tools, OAuth 2.1 + DCR, full Airtable-shaped data model (templates + lists + many-to-many memberships + flexible typed fields), per-stakeholder bearer keys, anonymous share codes with edit/comment/create permissions, and a public roadmap page at `/r/<code>` with four interactive view types (list / board / table / todo).
 
-We dog-food our own product: this repo's `blitzlist/` directory IS the canonical backlog for building Blitzlist. PRs against `blitzlist/items/` propose new work; the live MCP server (once running) syncs bidirectionally.
+What's live right now:
 
-If you want to be among the first to install it, watch this repo or open an issue.
+- **MCP server**: 23 tools at `mcp.blitzlist.ai/mcp` (OAuth), `mcp.blitzlist.ai/s/mcp` (stakeholder bearer), `mcp.blitzlist.ai/c/<code>/mcp` (share-code URL)
+- **Public roadmap pages**: anyone with a share code visits `/r/<code>`, picks a view, exports to CSV / Markdown / Excel, drags cards on the kanban, ticks todos, edits state via dropdowns — all without a login when the code grants those rights
+- **Landing**: [blitzlist.ai](https://blitzlist.ai) — see the founder note + roadmap onboarding
+- **Source**: this repo. AGPL-3.0 + commercial-license tier.
+
+What's coming in v1.0 (the Compass + web UI for workspace owners + release-notes ergonomics + Backlog.md round-trip).
+
+We dog-food our own product: this repo's `blitzlist/` directory IS the canonical backlog for building Blitzlist. PRs against `blitzlist/items/` propose new work; the live MCP server syncs bidirectionally.
 
 ---
 
@@ -77,13 +91,13 @@ The full AI-first shared workspace. Items + sprints + documents + files + workfl
 
 Inside Blitzlist (and also marketed standalone from v1.5): drop a binary, any MCP client reads it by reference. Like Dropbox, but built for the LLM workflow. Server-side text extraction for PPT, PDF, Word, Excel — your AI gets the content without you re-uploading.
 
-## Signature feature: the Compass
+## Signature feature: the Compass (v1.0)
 
 A 3D animated multi-dimensional priority view that **steers both humans and AI agents** toward high-impact work. Items are spheres positioned in priority space, sized by effort, colored by risk, animated by uncertainty.
 
 The same data drives the human visual and `get_focus()` calls from AI agents — **shared situational awareness**. A builder opens the Compass; their Claude Code session calls `get_focus()` in the background; both arrive at the same top-three items independently. No coordination needed.
 
-Per-list configurable: a backlog list shows urgency/importance/risk; a bugs list shows age/severity/customer-impact; an ideas list shows feasibility/novelty/team-excitement. Same engine, different mappings. See [ARCHITECTURE.md §3](./ARCHITECTURE.md) for the full design.
+Per-list configurable: a backlog list shows urgency/importance/risk; a bugs list shows age/severity/customer-impact; an ideas list shows feasibility/novelty/team-excitement. Same engine, different mappings. See [ARCHITECTURE.md §3](./ARCHITECTURE.md) for the full design. **Status:** designed, scoped, scheduled for v1.0. v0.5 ships with list / board / table / todo views as the practical workspace surface.
 
 ## Quick start
 
@@ -107,29 +121,80 @@ claude mcp add blitzlist https://mcp.blitzlist.ai/mcp
 
 Settings → Connectors → Add custom connector → URL `https://mcp.blitzlist.ai/mcp` → authorize.
 
-The v0.5 tool surface (13 tools, all annotated for the official MCP directory): `list_templates`, `create_list` (with optional `items[]` — populate in one call), `close_list`, `add_item`, `add_items` (batch), `get_item`, `list_items`, `update_item`, `set_state`, `set_executor`, `comment`, `add_item_to_list`, `remove_item_from_list`.
+The v0.5 tool surface (23 tools, all annotated for the official MCP directory):
+
+| Category | Tools |
+|---|---|
+| **Templates** | `list_templates` |
+| **Lists** | `create_list` (with optional `items[]` to populate in one call), `close_list` (delivered/slipped/cut audit), `generate_release_notes`, `set_list_default_view` |
+| **Items — single** | `add_item`, `get_item`, `update_item`, `set_state`, `set_executor`, `comment` |
+| **Items — batch** | `add_items` (up to 200/call), `update_items`, `set_states` |
+| **Membership** | `add_item_to_list`, `remove_item_from_list`, `list_items` (with inline comments + counts) |
+| **Sharing — stakeholder keys** | `create_stakeholder_key` (returns QR + raw key, shown once), `revoke_stakeholder_key`, `list_stakeholder_keys` |
+| **Sharing — share codes** | `create_share_code` (returns QR + 4-word URL), `revoke_share_code`, `list_share_codes` |
 
 Try it:
 
 ```
 > Create a shopping list with milk, bread, eggs.
-> Make a v0.5 release list with these items: build the dashboard, ship the migration, …
-> Add a backlog item: redesign the onboarding flow, priority p1.
+> Mark BL-001, BL-002, BL-003 as done.
+> Create a v0.5 release with these items: dashboard, migration, oauth. ship_target Sep 1.
+> Make a share code that lets reviewers comment on v0.5.
+> Generate release notes for v0.5 in customer style.
 ```
 
-The model should prefer the convenience tools (`create_list({items:[...]})`, `add_items(...)`) — both are single tool calls, so users see one approval prompt instead of N.
+The model prefers batch tools (`create_list({items:[...]})`, `add_items`, `set_states`, `update_items`) — each is a single tool call, so users see one approval prompt instead of N.
+
+### Public roadmap pages (no login required)
+
+Anyone you give a share code to opens it at **`https://mcp.blitzlist.ai/r/<code>`**. The page renders the list with full Linear-style polish — items, state pills, audit breakdown, comments, and a view switcher that lets the visitor pick:
+
+| View | What it shows |
+|---|---|
+| **List** | Items grouped by state, full cards with body + chips |
+| **Board** | Horizontal kanban columns per state; cards expand on click; drag-and-drop to change state when granted `edit` |
+| **Table** | Compact rows with state dropdown (editable) + click-to-expand description |
+| **Todo** | Checkboxes that toggle done/open in one click, no page reload |
+
+Visitors can also export the list to **CSV, Markdown, or Excel** (.xlsx) from the same page.
+
+Permissions on the share code decide what visitors can do:
+
+- `read` — view + export only (default)
+- `read + comment` — leave anonymous comments (with optional display name)
+- `read + edit` — change state via dropdown / drag / checkbox; rename and edit items
+- `read + create` — add new items to the list
+
+Either default view (`list` / `board` / `table` / `todo`) can be pinned per-list via `set_list_default_view`, or any visitor can override with `?view=board` etc.
 
 ### For self-hosters
 
-One click deploys your own Blitzlist instance on Cloudflare in about three minutes for about $5/month:
+Manual deploy works today (one-click button lands in v1.0):
 
+```bash
+# Prereqs: Node 20+, pnpm, a Cloudflare account
+git clone https://github.com/ai-fy/Blitzlist.git
+cd Blitzlist
+pnpm install
+
+# Provision Cloudflare resources for your own account:
+cd apps/api
+pnpm wrangler d1 create blitzlist-dev          # → copy database_id into wrangler.toml
+pnpm wrangler kv namespace create KV
+pnpm wrangler kv namespace create OAUTH_KV
+pnpm wrangler r2 bucket create blitzlist-attachments
+
+# Apply schema migrations:
+pnpm wrangler d1 execute blitzlist-dev --remote --file=./migrations/0000_workable_the_order.sql
+# ...repeat for each migration in apps/api/migrations/
+
+# Deploy your Worker:
+pnpm wrangler deploy
 ```
-[Deploy to Cloudflare]  (button lands when v0.1 ships)
-```
 
-What gets provisioned: a Worker (API + MCP server), D1 database, KV namespace, R2 bucket (attachments), Durable Object class (real-time fanout), Cloudflare Pages site. You get a fully functional Blitzlist on your own domain, fully under your control.
+What gets provisioned: a Worker (API + MCP server + roadmap renderer), D1 database, KV namespaces, R2 bucket (attachments). On the free tier the workload fits comfortably; expect ~$5/mo at light usage if you exceed it.
 
-See [ARCHITECTURE.md §8](./ARCHITECTURE.md) for the full deployment shape.
+See [ARCHITECTURE.md §8](./ARCHITECTURE.md) for the full deployment shape and migration paths.
 
 ### For contributors
 
@@ -165,7 +230,7 @@ Two paths in, both first-class:
 Anyone can propose a new requirement, doc, or fix without writing code:
 
 1. Fork this repo
-2. Add a file under `blitzlist/items/BW-XXX-your-slug.md` (use `XXX` as a placeholder; the sync engine assigns the real ID on merge)
+2. Add a file under `blitzlist/items/BL-XXX-your-slug.md` (use `XXX` as a placeholder; the sync engine assigns the real ID on merge)
 3. Open a PR
 4. Maintainers review like any code change
 
@@ -193,13 +258,13 @@ Blitzlist exposes a stable plugin API (see [ARCHITECTURE.md §17](./ARCHITECTURE
 
 ## Roadmap
 
-| Phase | Scope | Timeframe |
+| Phase | Scope | Status |
 |---|---|---|
-| **v0.1 — Single-user spike** | Hono Worker + D1 schema + 5 core MCP tools, no auth, no web UI. Validate the capture-while-coding loop. | 1 week |
-| **v0.5 — Multi-user beta + the wedge** | OAuth + stakeholder access keys + share codes; documents + files (Blitzbox surface); the Compass; bidirectional repo sync; one-click Cloudflare deploy | 4-5 weeks |
-| **v1.0 — Production** | GitHub auto-state, release notes generator, R2 attachment UI, billing, templates ecosystem, Backlog.md interop | 6-8 weeks |
-| **v1.5+** | Blitzbox as standalone landing page, Slack/SSO, local-sync community clients, public roadmap themes |
-| **v2.0+** | Claim the shared-workspace category: rich view types, workflow automation, inline databases in docs, whiteboard, unified inbox |
+| **v0.1 — Single-user spike** | Hono Worker + D1 schema + 5 core MCP tools, no auth, no web UI | ✓ shipped |
+| **v0.5 — Multi-user beta + the wedge** | Airtable-shaped data model (templates + flexible fields) · OAuth 2.1 + DCR · stakeholder access keys (per-person bearer) · share codes (anonymous diceware URLs with read/comment/edit/create perms) · public roadmap pages with list/board/table/todo views · drag-and-drop kanban · CSV/Markdown/Excel exports · release-notes generator · 23 MCP tools | ✓ shipping now |
+| **v1.0 — Production** | The Compass (3D priority visualization) · R2 attachments + Blitzbox surface · web UI for workspace owners · billing · templates ecosystem · Backlog.md round-trip interop · one-click Cloudflare deploy button | next |
+| **v1.5+** | Blitzbox as standalone landing page, Slack/SSO, local-sync community clients, public roadmap themes | |
+| **v2.0+** | Claim the shared-workspace category: rich view types, workflow automation, inline databases in docs, whiteboard, unified inbox | |
 
 ## License
 
