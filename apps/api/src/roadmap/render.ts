@@ -218,41 +218,31 @@ function renderBreakdown(
 	const slippedPct = total === 0 ? 0 : (breakdown.slipped.length / total) * 100;
 	const cutPct = total === 0 ? 0 : (breakdown.cut.length / total) * 100;
 
+	const hasAnyItems = breakdown.delivered.length + breakdown.slipped.length + breakdown.cut.length > 0;
 	return `
-		<div class="audit">
-			<div class="audit-header">
-				<div class="audit-title">Audit</div>
-				<div class="audit-rate"><span class="rate-value">${rate}%</span> delivery rate</div>
+		<div class="audit" role="group" aria-label="Audit summary">
+			<div class="audit-strip">
+				<span class="audit-rate"><strong>${rate}%</strong> delivered</span>
+				<span class="audit-sep" aria-hidden="true"></span>
+				<span class="legend-item tone-shipped"><span class="dot"></span><span class="legend-count">${breakdown.delivered.length}</span> delivered</span>
+				<span class="legend-item tone-at-risk"><span class="dot"></span><span class="legend-count">${breakdown.slipped.length}</span> slipped</span>
+				<span class="legend-item tone-neutral"><span class="dot"></span><span class="legend-count">${breakdown.cut.length}</span> cut</span>
 			</div>
 			<div class="audit-bar" role="img" aria-label="${breakdown.delivered.length} delivered, ${breakdown.slipped.length} slipped, ${breakdown.cut.length} cut">
 				<div class="bar-seg seg-delivered" style="width:${deliveredPct}%"></div>
 				<div class="bar-seg seg-slipped" style="width:${slippedPct}%"></div>
 				<div class="bar-seg seg-cut" style="width:${cutPct}%"></div>
 			</div>
-			<div class="audit-legend">
-				<div class="legend-item tone-shipped">
-					<span class="dot"></span>
-					<span class="legend-count">${breakdown.delivered.length}</span>
-					<span class="legend-label">delivered</span>
-				</div>
-				<div class="legend-item tone-at-risk">
-					<span class="dot"></span>
-					<span class="legend-count">${breakdown.slipped.length}</span>
-					<span class="legend-label">slipped</span>
-				</div>
-				<div class="legend-item tone-neutral">
-					<span class="dot"></span>
-					<span class="legend-count">${breakdown.cut.length}</span>
-					<span class="legend-label">cut</span>
-				</div>
-			</div>
 			${
-				breakdown.delivered.length + breakdown.slipped.length + breakdown.cut.length > 0
-					? `<div class="audit-detail">
-				${detailList('Delivered', 'shipped', breakdown.delivered, idToItem)}
-				${detailList('Slipped', 'at-risk', breakdown.slipped, idToItem)}
-				${detailList('Cut', 'neutral', breakdown.cut, idToItem)}
-			</div>`
+				hasAnyItems
+					? `<details class="audit-detail">
+				<summary>Item breakdown</summary>
+				<div class="audit-detail-body">
+					${detailList('Delivered', 'shipped', breakdown.delivered, idToItem)}
+					${detailList('Slipped', 'at-risk', breakdown.slipped, idToItem)}
+					${detailList('Cut', 'neutral', breakdown.cut, idToItem)}
+				</div>
+			</details>`
 					: ''
 			}
 		</div>
@@ -276,26 +266,17 @@ function renderLiveSummary(items: ItemRow[], stateField: FieldDef | undefined): 
 	const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
 	return `
-		<div class="audit live">
-			<div class="audit-header">
-				<div class="audit-title">Progress <span class="live-tag">live</span></div>
-				<div class="audit-rate"><span class="rate-value">${pct}%</span> complete</div>
+		<div class="audit live" role="group" aria-label="Progress">
+			<div class="audit-strip">
+				<span class="audit-rate"><strong>${pct}%</strong> complete</span>
+				<span class="live-tag">live</span>
+				<span class="audit-sep" aria-hidden="true"></span>
+				<span class="legend-item tone-shipped"><span class="dot"></span><span class="legend-count">${done}</span> done</span>
+				<span class="legend-item tone-neutral"><span class="dot"></span><span class="legend-count">${total - done}</span> open</span>
 			</div>
 			<div class="audit-bar">
 				<div class="bar-seg seg-delivered" style="width:${pct}%"></div>
 				<div class="bar-seg seg-empty" style="width:${100 - pct}%"></div>
-			</div>
-			<div class="audit-legend">
-				<div class="legend-item tone-shipped">
-					<span class="dot"></span>
-					<span class="legend-count">${done}</span>
-					<span class="legend-label">done</span>
-				</div>
-				<div class="legend-item tone-neutral">
-					<span class="dot"></span>
-					<span class="legend-count">${total - done}</span>
-					<span class="legend-label">open</span>
-				</div>
 			</div>
 		</div>
 	`;
@@ -1353,59 +1334,78 @@ main {
 .meta-pill.tone-shipped { color: var(--shipped); border-color: rgba(76, 183, 130, 0.35); }
 .meta-pill.tone-shipped .meta-pill-label { color: var(--shipped); opacity: 0.8; }
 
-/* === Audit / Progress === */
-.audit {
-	background: var(--bg-1);
-	border: 1px solid var(--border);
-	border-radius: 12px;
-	padding: var(--space-5);
+/* === Audit / Progress — compact single-strip + thin bar === */
+.audit { display: flex; flex-direction: column; gap: 6px; }
+.audit-strip {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-3);
+	font-size: 12.5px;
+	color: var(--fg-3);
+	line-height: 1.4;
 }
-.audit-header {
-	display: flex; align-items: center; justify-content: space-between;
-	margin-bottom: var(--space-4);
-}
-.audit-title {
-	font-size: 12px; font-weight: 600; color: var(--fg-3);
-	text-transform: uppercase; letter-spacing: 0.06em;
-}
+.audit-rate { color: var(--fg-3); }
+.audit-rate strong { color: var(--fg); font-weight: 600; font-size: 14px; margin-right: 4px; }
+.audit-sep { width: 1px; height: 12px; background: var(--border-bright); align-self: center; }
 .live-tag {
-	margin-left: var(--space-2);
 	padding: 1px 6px;
 	background: var(--on-track-glow);
 	color: var(--on-track);
-	border-radius: 4px;
-	font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+	border-radius: 3px;
+	font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em;
 	text-transform: uppercase;
 }
-.audit-rate { font-size: 13px; color: var(--fg-3); }
-.rate-value { font-size: 18px; font-weight: 600; color: var(--fg); margin-right: 4px; }
 
 .audit-bar {
-	display: flex; gap: 2px;
-	height: 6px; border-radius: 4px; overflow: hidden;
+	display: flex; gap: 1px;
+	height: 4px; border-radius: 2px; overflow: hidden;
 	background: var(--bg-2);
-	margin-bottom: var(--space-4);
 }
 .bar-seg { transition: width 0.3s ease; }
-.seg-delivered { background: var(--shipped); box-shadow: 0 0 8px var(--shipped-glow); }
+.seg-delivered { background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); }
 .seg-slipped { background: var(--at-risk); }
 .seg-cut { background: var(--neutral); }
 .seg-empty { background: transparent; }
 
-.audit-legend { display: flex; gap: var(--space-5); flex-wrap: wrap; }
-.legend-item { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 13px; }
-.legend-item .dot { width: 8px; height: 8px; border-radius: 50%; }
-.legend-item.tone-shipped .dot { background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); }
+.legend-item {
+	display: inline-flex; align-items: baseline; gap: 4px;
+	font-size: 12px;
+}
+.legend-item .dot {
+	width: 6px; height: 6px; border-radius: 50%;
+	display: inline-block;
+	transform: translateY(-1px);
+}
+.legend-item.tone-shipped .dot { background: var(--shipped); }
 .legend-item.tone-at-risk .dot { background: var(--at-risk); }
 .legend-item.tone-neutral .dot { background: var(--neutral); }
 .legend-count { font-weight: 600; color: var(--fg); }
-.legend-label { color: var(--fg-3); }
 
-.audit-detail { margin-top: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+/* Collapsible item-breakdown lives below as a tiny chevron link */
+.audit-detail { margin-top: 2px; }
+.audit-detail > summary {
+	cursor: pointer; user-select: none;
+	font-size: 11.5px; color: var(--fg-3); font-weight: 500;
+	padding: 2px 0;
+	list-style: none;
+	display: inline-block;
+}
+.audit-detail > summary::-webkit-details-marker { display: none; }
+.audit-detail > summary::before {
+	content: '▸';
+	margin-right: 4px; color: var(--fg-4);
+	transition: transform 0.15s;
+	display: inline-block;
+}
+.audit-detail[open] > summary::before { transform: rotate(90deg); color: var(--fg-3); }
+.audit-detail > summary:hover { color: var(--fg); }
+.audit-detail-body { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+
 .detail-block summary {
 	cursor: pointer; user-select: none;
-	font-size: 13px; color: var(--fg-2); font-weight: 500;
-	padding: var(--space-2) 0;
+	font-size: 12.5px; color: var(--fg-2); font-weight: 500;
+	padding: 4px 0;
 	list-style: none;
 }
 .detail-block summary::-webkit-details-marker { display: none; }
@@ -1414,13 +1414,13 @@ main {
 .detail-block .count {
 	display: inline-block;
 	margin-left: var(--space-2);
-	padding: 1px 6px;
+	padding: 0 5px;
 	background: var(--bg-2);
-	border-radius: 4px;
-	font-size: 11px; color: var(--fg-3); font-weight: 500;
+	border-radius: 3px;
+	font-size: 10.5px; color: var(--fg-3); font-weight: 500;
 }
-.detail-block ul { list-style: none; padding-left: var(--space-4); margin-top: var(--space-2); }
-.detail-block li { display: flex; gap: var(--space-3); padding: 3px 0; font-size: 13px; }
+.detail-block ul { list-style: none; padding-left: var(--space-4); margin-top: 2px; }
+.detail-block li { display: flex; gap: var(--space-3); padding: 2px 0; font-size: 12.5px; }
 .detail-block .id { color: var(--fg-4); min-width: 60px; }
 .detail-block .t { color: var(--fg-2); }
 
@@ -2241,7 +2241,6 @@ footer .links { display: flex; gap: var(--space-4); }
 	.hero-title { font-size: 28px; }
 	.hero-row { gap: var(--space-3); }
 	.hero-diamond { width: 36px; height: 36px; }
-	.audit { padding: var(--space-4); }
 	.card-head { flex-wrap: wrap; }
 	.card-id { font-size: 11px; }
 	.edit-state { flex-wrap: wrap; }

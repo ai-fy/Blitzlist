@@ -403,6 +403,55 @@ export const share_codes = sqliteTable(
 	(t) => [index('idx_share_codes_workspace').on(t.workspace_id)],
 );
 
+// === Files (BL-021) ==========================================================
+
+// Binary artifacts stored in R2. files holds the head; file_versions is the
+// append-only history. R2 key includes a content sha256 so identical bytes
+// dedup at the storage layer.
+
+export const files = sqliteTable(
+	'files',
+	{
+		id: text('id').primaryKey(),
+		workspace_id: text('workspace_id')
+			.notNull()
+			.references(() => workspaces.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		folder_path: text('folder_path').notNull().default('/'),
+		mime_type: text('mime_type').notNull(),
+		size_bytes: integer('size_bytes').notNull(),
+		current_version_id: text('current_version_id'),
+		uploaded_by: text('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+		revoked_at: integer('revoked_at', { mode: 'timestamp' }),
+		...timestamps,
+	},
+	(t) => [
+		index('idx_files_workspace').on(t.workspace_id),
+		index('idx_files_workspace_folder').on(t.workspace_id, t.folder_path),
+	],
+);
+
+export const file_versions = sqliteTable(
+	'file_versions',
+	{
+		id: text('id').primaryKey(),
+		file_id: text('file_id')
+			.notNull()
+			.references(() => files.id, { onDelete: 'cascade' }),
+		version: integer('version').notNull(),
+		r2_key: text('r2_key').notNull(),
+		sha256_hex: text('sha256_hex').notNull(),
+		mime_type: text('mime_type').notNull(),
+		size_bytes: integer('size_bytes').notNull(),
+		uploaded_by: text('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+		note: text('note'),
+		created_at: integer('created_at', { mode: 'timestamp' })
+			.notNull()
+			.default(sql`(unixepoch())`),
+	},
+	(t) => [index('idx_file_versions_file').on(t.file_id, t.version)],
+);
+
 // === Activity log ============================================================
 
 export type ActivityAction =
@@ -427,6 +476,9 @@ export type ActivityAction =
 	| 'stakeholder_key.revoked' // BL-011
 	| 'share_code.created' // BL-030
 	| 'share_code.revoked' // BL-030
+	| 'file.uploaded' // BL-021
+	| 'file.updated' // BL-021 — new version
+	| 'file.deleted' // BL-021
 	| 'user.joined';
 
 export const activity_log = sqliteTable(
@@ -465,6 +517,8 @@ export const schema = {
 	items,
 	item_lists,
 	comments,
+	files,
+	file_versions,
 	stakeholder_access_keys,
 	share_codes,
 	activity_log,

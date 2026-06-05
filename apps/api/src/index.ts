@@ -1157,6 +1157,7 @@ async function apiFetch(
 			user_id: props.user_id,
 			workspace_id: props.workspace_id,
 			db: getDb(env),
+			env,
 		},
 	});
 

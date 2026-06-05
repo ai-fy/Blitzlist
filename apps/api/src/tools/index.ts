@@ -51,6 +51,7 @@
 
 import { createToolRegistry } from '@blitzlist/mcp';
 import type { Db } from '../db.js';
+import type { WorkspaceToolCtx } from '../workspace-context.js';
 
 import { listTemplates } from './list-templates.js';
 import { createList } from './create-list.js';
@@ -75,8 +76,12 @@ import { listStakeholderKeys } from './list-stakeholder-keys.js';
 import { createShareCode } from './create-share-code.js';
 import { revokeShareCode } from './revoke-share-code.js';
 import { listShareCodes } from './list-share-codes.js';
+import { uploadFile } from './upload-file.js';
+import { getFile } from './get-file.js';
+import { listFiles } from './list-files.js';
+import { deleteFile } from './delete-file.js';
 
-export const toolRegistry = createToolRegistry<Db>([
+export const toolRegistry = createToolRegistry<Db, WorkspaceToolCtx>([
 	listTemplates,
 	createList,
 	closeList,
@@ -100,4 +105,8 @@ export const toolRegistry = createToolRegistry<Db>([
 	createShareCode,
 	revokeShareCode,
 	listShareCodes,
+	uploadFile,
+	getFile,
+	listFiles,
+	deleteFile,
 ]);
