@@ -14,6 +14,7 @@
 import type { lists, items, templates, workspaces, comments } from '@blitzlist/db';
 import type { DefaultView, FieldDef, ListMeta, StakeholderPermission } from '@blitzlist/db';
 import { renderMarkdown, renderInlinePreview } from '../markdown.js';
+import { effectiveStateOptions, effectiveFieldSchema } from '../list-effective.js';
 
 type ListRow = typeof lists.$inferSelect;
 type ItemRow = typeof items.$inferSelect;
@@ -86,15 +87,17 @@ export function renderRoadmap(input: RenderInput): string {
 	const commentsByItem = input.commentsByItem ?? {};
 	const filesById = input.filesById ?? {};
 	const meta = list.meta_json as ListMeta;
-	const schemaFields: FieldDef[] = (template?.fields_schema_json as FieldDef[]) ?? [];
+	// Effective schema = template fields ∪ per-list extra_fields. Lets the
+	// user introduce ad-hoc fields (priority on a release list, etc.)
+	// without editing the template.
+	const schemaFields: FieldDef[] = effectiveFieldSchema(
+		(template?.fields_schema_json as FieldDef[] | undefined) ?? null,
+		meta,
+	);
 	const stateField = schemaFields.find((f) => f.key === 'state' && f.type === 'single_select');
-	// Effective state options = template declared options + per-list extras
-	// (BL-022 open state enum). Extras appended in order of first appearance;
-	// declared options keep their order.
-	const listExtras = meta.extra_state_options ?? [];
-	const stateOrder = stateField
-		? mergeOptions(stateField.options ?? [], listExtras)
-		: [];
+	// Effective state options: template options + extras, optionally re-ordered
+	// by list.meta_json.state_options_order.
+	const stateOrder = effectiveStateOptions(stateField?.options, meta);
 	const terminalStates = new Set(stateField?.terminal ?? []);
 	const can = {
 		comment: permissions.includes('comment'),
@@ -134,6 +137,7 @@ export function renderRoadmap(input: RenderInput): string {
 	<meta name="description" content="${escape(list.description ?? list.name)}" />
 	<meta name="theme-color" content="#08090a" />
 	<meta name="robots" content="noindex" />
+	<meta name="share-code" content="${escape(share_code)}" />
 	<meta property="og:title" content="${escape(list.name)} — ${escape(workspace.name)}" />
 	<meta property="og:description" content="${escape(list.description ?? list.name)}" />
 	<meta property="og:type" content="website" />
@@ -548,10 +552,11 @@ function renderKanbanView(args: ViewArgs): string {
 	const cols: string[] = [];
 	const ordered = args.stateOrder.length > 0 ? args.stateOrder : Array.from(args.groups.keys());
 	const seen = new Set<string>();
+	const colHeaderDraggable = args.can.edit ? 'true' : 'false';
 	const emitCol = (state: string, arr: ItemRow[], tone: StateTone) => {
 		cols.push(`
 			<div class="kanban-col" data-state="${escape(state)}" data-tone="${tone}">
-				<div class="kanban-col-header">
+				<div class="kanban-col-header" draggable="${colHeaderDraggable}" data-state="${escape(state)}" title="${args.can.edit ? 'Drag to reorder columns' : ''}">
 					${statusPill(state, tone)}
 					<span class="kanban-col-count">${arr.length}</span>
 				</div>
@@ -1041,23 +1046,6 @@ function escape(s: string): string {
 		.replace(/'/g, '&#39;');
 }
 
-/**
- * Merge declared options with per-list extras. Declared order preserved;
- * extras appended in their stored order, deduped against declared.
- */
-function mergeOptions(base: string[], extras: string[]): string[] {
-	if (extras.length === 0) return base;
-	const seen = new Set(base);
-	const out = [...base];
-	for (const e of extras) {
-		if (!seen.has(e)) {
-			seen.add(e);
-			out.push(e);
-		}
-	}
-	return out;
-}
-
 // === Icons ===================================================================
 
 // Header brand uses the logo PNG hosted on the landing site; the diamond
@@ -1310,6 +1298,79 @@ function pageScript(shareCode: string): string {
 					console.error('kanban drop failed', err);
 					alert('Could not move card: ' + err.message);
 				});
+		});
+	});
+
+	// === Kanban: column-header drag-to-reorder =============================
+	// Edit-permission visitors can drag column headers to reorder the
+	// columns. On drop we POST the new state-name order to
+	// /r/<code>/state-order; server persists to list.meta_json.
+	var headerDragging = null;
+	var shareCodeRaw = document.querySelector('meta[name="share-code"]');
+	var shareCode = shareCodeRaw ? shareCodeRaw.getAttribute('content') : null;
+	document.querySelectorAll('.kanban-col-header[draggable="true"]').forEach(function (hdr) {
+		hdr.addEventListener('dragstart', function (e) {
+			headerDragging = hdr.dataset.state || null;
+			hdr.classList.add('is-dragging-col');
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('application/x-kanban-col', headerDragging || '');
+			}
+		});
+		hdr.addEventListener('dragend', function () {
+			hdr.classList.remove('is-dragging-col');
+			headerDragging = null;
+			document.querySelectorAll('.kanban-col.is-col-drop-target').forEach(function (c) {
+				c.classList.remove('is-col-drop-target');
+			});
+		});
+	});
+	// Drop targets are the columns themselves — we read the new order from DOM
+	// after rearranging.
+	document.querySelectorAll('.kanban-col[data-state]').forEach(function (col) {
+		col.addEventListener('dragover', function (e) {
+			if (!headerDragging) return;
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+			col.classList.add('is-col-drop-target');
+		});
+		col.addEventListener('dragleave', function () {
+			col.classList.remove('is-col-drop-target');
+		});
+		col.addEventListener('drop', function (e) {
+			if (!headerDragging) return;
+			e.preventDefault();
+			col.classList.remove('is-col-drop-target');
+			var draggedState = headerDragging;
+			var targetState = col.dataset.state;
+			if (!draggedState || !targetState || draggedState === targetState) return;
+			var board = col.closest('.kanban-board');
+			if (!board) return;
+			var draggedCol = board.querySelector('.kanban-col[data-state="' + (window.CSS && CSS.escape ? CSS.escape(draggedState) : draggedState) + '"]');
+			if (!draggedCol) return;
+			// Move dragged column before the target (insert-before semantics).
+			board.insertBefore(draggedCol, col);
+			// Read the new order from the DOM, skipping the "no state" + "+ add"
+			// columns which don't have data-state.
+			var newOrder = Array.prototype.map.call(
+				board.querySelectorAll('.kanban-col[data-state]'),
+				function (c) { return c.dataset.state; }
+			);
+			if (!shareCode) {
+				alert('Share code missing — cannot persist reorder.');
+				return;
+			}
+			fetch('/r/' + encodeURIComponent(shareCode) + '/state-order', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+				body: JSON.stringify({ options: newOrder }),
+			}).then(function (r) {
+				if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+				flashCell(col);
+			}).catch(function (err) {
+				console.error('column reorder failed', err);
+				alert('Could not persist column order: ' + err.message);
+			});
 		});
 	});
 })();
@@ -1592,6 +1653,10 @@ main {
 	gap: var(--space-3);
 }
 .kanban-col-header { display: flex; align-items: center; justify-content: space-between; }
+.kanban-col-header[draggable="true"] { cursor: grab; user-select: none; }
+.kanban-col-header[draggable="true"]:active { cursor: grabbing; }
+.kanban-col-header.is-dragging-col { opacity: 0.4; }
+.kanban-col.is-col-drop-target { box-shadow: inset 3px 0 0 var(--accent); }
 .kanban-col-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
 .kanban-col-cards { display: flex; flex-direction: column; gap: var(--space-2); min-height: 40px; }
 

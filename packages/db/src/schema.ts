@@ -199,6 +199,26 @@ export type ListMeta = {
 	 * the validator (combined with template.options as the allowed set).
 	 */
 	extra_state_options?: string[];
+	/**
+	 * Explicit, full state ordering for this list. When set, this is the
+	 * canonical column order for the kanban view and the dropdown order in
+	 * state-edit selects. Lets the user move "estimating" between "planned"
+	 * and "shipping" instead of always at the end. Should contain every
+	 * value in (template.state.options ∪ extra_state_options) — missing
+	 * values fall back to template order (defensive).
+	 */
+	state_options_order?: string[];
+	/**
+	 * Per-list extra field definitions. Merged into the template's
+	 * fields_schema_json when validating / rendering items in this list.
+	 * Lets users add a "priority" column to a release-template list without
+	 * editing the template (which would affect all release lists).
+	 *
+	 * Field defs use the same FieldDef shape as templates. Set explicitly
+	 * via add_list_field, or auto-extended (heuristic type-guess) when
+	 * update_item/set_state etc. receive a key not in the template.
+	 */
+	extra_fields?: FieldDef[];
 	// free-form
 	[key: string]: unknown;
 };
@@ -484,6 +504,8 @@ export type ActivityAction =
 	| 'list.closed' // BL-035 (replaces release.closed; runs audit when applicable)
 	| 'list.archived'
 	| 'list.state_options_extended' // BL-022 — per-list extra_state_options grew
+	| 'list.state_options_reordered' // BL-022 — state_options_order changed
+	| 'list.field_added' // BL-022 — extra_fields gained a field def (explicit add_list_field or auto-extend)
 	| 'template.created' // BL-035
 	| 'template.field_added' // BL-035
 	| 'template.field_removed' // BL-035

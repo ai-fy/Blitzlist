@@ -14,6 +14,7 @@ import { and, eq } from 'drizzle-orm';
 import { schema } from '@blitzlist/db';
 import { validateItemFields, findStateFieldDef } from '@blitzlist/core';
 import { recordNovelStateForItem } from './_state-extras-helper.js';
+import { autoExtendListFieldsForItem } from './_field-extras-helper.js';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 import { itemToResponse } from './_response-helper.js';
@@ -114,9 +115,25 @@ export const updateItem: ToolDef<UpdateItemArgs, unknown, Db> = {
 		const current = item.fields_json as Record<string, unknown>;
 		const patch = args.fields ?? {};
 
+		// BL-022: auto-extend the item's primary list's extra_fields for any
+		// unknown keys in the patch — with type guessed from the value.
+		// Returns the merged effective schema (template + existing extras +
+		// newly auto-added).
+		let effectiveSchema = fields_schema;
+		if (Object.keys(patch).length > 0 && fields_schema.length > 0) {
+			const ext = await autoExtendListFieldsForItem({
+				db: ctx.db,
+				workspace_id: ctx.workspace_id,
+				item_id: args.id,
+				template_schema: fields_schema,
+				patch,
+			});
+			effectiveSchema = ext.mergedSchema;
+		}
+
 		const merged =
-			fields_schema.length > 0
-				? validateItemFields({ schema: fields_schema, current, patch, isCreate: false })
+			effectiveSchema.length > 0
+				? validateItemFields({ schema: effectiveSchema, current, patch, isCreate: false })
 				: { ...current, ...patch };
 
 		// Compute which fields actually changed (for activity log).
@@ -161,7 +178,7 @@ export const updateItem: ToolDef<UpdateItemArgs, unknown, Db> = {
 		// BL-022: if the patch changed the canonical state field to a novel
 		// value, register it as a per-list extra so future writes + the
 		// renderer know about it.
-		const stateField = findStateFieldDef(fields_schema);
+		const stateField = findStateFieldDef(effectiveSchema);
 		if (stateField && fieldsChanged && stateField.key in changedFields) {
 			const newState = merged[stateField.key];
 			if (typeof newState === 'string') {

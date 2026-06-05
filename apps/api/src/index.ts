@@ -28,7 +28,7 @@
 import { Hono } from 'hono';
 import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
-import { schema, type StakeholderPermission, type StakeholderScope, type FieldDef } from '@blitzlist/db';
+import { schema, type StakeholderPermission, type StakeholderScope, type FieldDef, type ListMeta } from '@blitzlist/db';
 import { findStateFieldDef, validateFieldValue, validateItemFields } from '@blitzlist/core';
 import {
 	type JsonRpcNotification,
@@ -1100,6 +1100,60 @@ defaultApp.post('/r/:code/state-option', async (c) => {
 		undefined,
 		view,
 	);
+});
+
+// === /r/:code/state-order — persist drag-and-drop column reorder ============
+//
+// BL-022: kanban column headers are draggable for edit-permission visitors.
+// On drop the client POSTs the new state-name order; we persist to
+// lists.meta_json.state_options_order. Body is JSON: {options: string[]}.
+defaultApp.post('/r/:code/state-order', async (c) => {
+	const db = getDb(c.env);
+	const sc = await loadShareCode(db, c.req.param('code'));
+	if (!sc) return c.json({ error: 'not_found' }, 404);
+	const permissions = sc.permissions_json as StakeholderPermission[];
+	if (!permissions.includes('edit')) {
+		return c.json({ error: 'forbidden', message: 'Edit permission required.' }, 403);
+	}
+	let body: { options?: unknown };
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ error: 'bad_request', message: 'Invalid JSON body.' }, 400);
+	}
+	const optionsRaw = body?.options;
+	if (!Array.isArray(optionsRaw) || !optionsRaw.every((v) => typeof v === 'string')) {
+		return c.json({ error: 'bad_request', message: '`options` must be an array of strings.' }, 400);
+	}
+	const options = (optionsRaw as string[]).map((s) => s.trim()).filter((s) => s.length > 0);
+	if (options.length === 0) {
+		return c.json({ error: 'bad_request', message: '`options` cannot be empty.' }, 400);
+	}
+	const data = await loadExportData(db, sc);
+	if (!data) return c.json({ error: 'not_found', message: 'No list in scope.' }, 404);
+	const meta = (data.list.meta_json ?? {}) as ListMeta;
+	const newMeta: ListMeta = { ...meta, state_options_order: options };
+	const now = new Date();
+	await db
+		.update(schema.lists)
+		.set({ meta_json: newMeta, updated_at: now })
+		.where(eq(schema.lists.id, data.list.id));
+	await db.insert(schema.activity_log).values({
+		id: uuid(),
+		workspace_id: sc.workspace_id,
+		item_id: null,
+		actor_id: null,
+		action: 'list.state_options_reordered',
+		details_json: {
+			list_id: data.list.id,
+			list_slug: data.list.slug,
+			new_order: options,
+			previous_order: meta.state_options_order ?? null,
+			via: 'web-drag',
+		},
+		created_at: now,
+	});
+	return c.json({ ok: true, options });
 });
 
 defaultApp.post('/r/:code/new-item', async (c) => {

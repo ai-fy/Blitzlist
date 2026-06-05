@@ -12,6 +12,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { schema, type FieldDef } from '@blitzlist/db';
 import { validateItemFields, findStateFieldDef } from '@blitzlist/core';
 import { recordNovelStateForItem } from './_state-extras-helper.js';
+import { autoExtendListFieldsForItem } from './_field-extras-helper.js';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 
@@ -152,6 +153,7 @@ export const updateItems: ToolDef<UpdateItemsArgs, unknown, Db> = {
 			current: Record<string, unknown>;
 			merged: Record<string, unknown>;
 			changedFields: Record<string, { from: unknown; to: unknown }>;
+			effectiveSchema: FieldDef[];
 			titleChanged: boolean;
 			bodyChanged: boolean;
 		};
@@ -169,12 +171,32 @@ export const updateItems: ToolDef<UpdateItemsArgs, unknown, Db> = {
 				: [];
 			const current = item.fields_json as Record<string, unknown>;
 			const patch = u.fields ?? {};
+			// BL-022: auto-extend per-list extras for unknown keys (type-guessed).
+			let effectiveSchema = fieldsSchema;
+			if (Object.keys(patch).length > 0 && fieldsSchema.length > 0) {
+				try {
+					const ext = await autoExtendListFieldsForItem({
+						db: ctx.db,
+						workspace_id: ctx.workspace_id,
+						item_id: u.id,
+						template_schema: fieldsSchema,
+						patch,
+					});
+					effectiveSchema = ext.mergedSchema;
+				} catch (err) {
+					errors.push({
+						id: u.id,
+						error: err instanceof Error ? err.message : 'auto-extend failed',
+					});
+					continue;
+				}
+			}
 			let merged: Record<string, unknown>;
 			try {
 				merged =
-					fieldsSchema.length > 0
+					effectiveSchema.length > 0
 						? validateItemFields({
-								schema: fieldsSchema,
+								schema: effectiveSchema,
 								current,
 								patch,
 								isCreate: false,
@@ -201,6 +223,7 @@ export const updateItems: ToolDef<UpdateItemsArgs, unknown, Db> = {
 				current,
 				merged,
 				changedFields,
+				effectiveSchema,
 				titleChanged: u.title !== undefined && u.title !== item.title,
 				bodyChanged: u.body !== undefined && u.body !== item.body,
 			});
@@ -250,10 +273,8 @@ export const updateItems: ToolDef<UpdateItemsArgs, unknown, Db> = {
 				// as a per-list extra. Look up the stateField from the cached
 				// per-item template schema.
 				const item = itemById.get(r.id)!;
-				const fieldsSchema = item.template_id
-					? (schemaByTemplate.get(item.template_id) ?? [])
-					: [];
-				const stateField = findStateFieldDef(fieldsSchema);
+				void item;
+				const stateField = findStateFieldDef(r.effectiveSchema);
 				if (stateField && fieldsChanged && stateField.key in r.changedFields) {
 					const newState = r.merged[stateField.key];
 					if (typeof newState === 'string') {

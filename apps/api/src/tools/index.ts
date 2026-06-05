@@ -9,6 +9,8 @@
  *   Lists:
  *     create_list                                   — create a list (with optional template)
  *     update_list                                   — rename / re-slug / edit metadata (BL-022)
+ *     reorder_state_options                         — set kanban column order (BL-022)
+ *     add_list_field                                — per-list field schema extension (BL-022)
  *     close_list                                    — close + run delivered/slipped/cut audit
  *     generate_release_notes                        — Markdown notes from a list's breakdown
  *
@@ -64,6 +66,8 @@ import { listTemplates } from './list-templates.js';
 import { createList } from './create-list.js';
 import { updateList } from './update-list.js';
 import { closeList } from './close-list.js';
+import { reorderStateOptions } from './reorder-state-options.js';
+import { addListField } from './add-list-field.js';
 import { generateReleaseNotes } from './generate-release-notes.js';
 import { setListDefaultView } from './set-list-default-view.js';
 import { addItem } from './add-item.js';
@@ -93,6 +97,8 @@ export const toolRegistry = createToolRegistry<Db, WorkspaceToolCtx>([
 	listTemplates,
 	createList,
 	updateList,
+	reorderStateOptions,
+	addListField,
 	closeList,
 	generateReleaseNotes,
 	setListDefaultView,
