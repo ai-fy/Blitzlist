@@ -49,6 +49,7 @@ import type { ScopedToolContext } from './stakeholder-context.js';
 import { resolveAllowedListIds } from './tools/stakeholder/_scope-helper.js';
 import { itemsToCSV, itemsToMarkdown, itemsToXLSX, sanitizeFilename } from './roadmap/export.js';
 import { renderRoadmap } from './roadmap/render.js';
+import { getObject } from './r2.js';
 
 const VERSION = '0.1.0';
 
@@ -412,6 +413,46 @@ defaultApp.get('/r/:code', async (c) => {
 		}
 	}
 
+	// Pre-load attachment file metadata referenced by visible items. Single
+	// batched query; rendering layer stays pure.
+	const attachmentFieldKeys = new Set(
+		(template?.fields_schema_json as FieldDef[] | undefined ?? [])
+			.filter((f) => f.type === 'attachment')
+			.map((f) => f.key),
+	);
+	const referencedFileIds = new Set<string>();
+	if (attachmentFieldKeys.size > 0) {
+		for (const item of itemRows) {
+			const fields = item.fields_json as Record<string, unknown>;
+			for (const key of attachmentFieldKeys) {
+				const v = fields[key];
+				if (typeof v === 'string') referencedFileIds.add(v);
+				else if (Array.isArray(v)) {
+					for (const e of v) if (typeof e === 'string') referencedFileIds.add(e);
+				}
+			}
+		}
+	}
+	const filesById: Record<string, { id: string; name: string; mime_type: string; size_bytes: number }> = {};
+	if (referencedFileIds.size > 0) {
+		const fileRows = await db
+			.select({
+				id: schema.files.id,
+				name: schema.files.name,
+				mime_type: schema.files.mime_type,
+				size_bytes: schema.files.size_bytes,
+			})
+			.from(schema.files)
+			.where(
+				and(
+					inArray(schema.files.id, Array.from(referencedFileIds)),
+					eq(schema.files.workspace_id, sc.workspace_id),
+					isNull(schema.files.revoked_at),
+				),
+			);
+		for (const f of fileRows) filesById[f.id] = f;
+	}
+
 	const permissions = sc.permissions_json as StakeholderPermission[];
 	const displayName = readDisplayNameCookie(c.req.header('cookie'));
 
@@ -444,6 +485,7 @@ defaultApp.get('/r/:code', async (c) => {
 		template,
 		items: itemRows,
 		commentsByItem,
+		filesById,
 		share_code: sc.code,
 		view_url: `https://mcp.blitzlist.ai/r/${sc.code}`,
 		permissions,
@@ -650,6 +692,64 @@ defaultApp.get('/r/:code/export.xlsx', async (c) => {
 			'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 			'content-disposition': `attachment; filename="${fname}"`,
 			'cache-control': 'private, max-age=60',
+		},
+	});
+});
+
+// === /r/:code/file/:id — share-code-authenticated file streaming ============
+//
+// Serves a file's current version bytes from R2. Authorization is via the
+// share code in the URL — same trust model as the rest of /r/:code. The file
+// must belong to the share code's workspace and not be revoked.
+//
+// Used by inline <img> tags on the public roadmap page (small images get
+// data-URI inlined; everything else routes through here).
+defaultApp.get('/r/:code/file/:id', async (c) => {
+	const db = getDb(c.env);
+	const sc = await loadShareCode(db, c.req.param('code'));
+	if (!sc) return new Response('not found', { status: 404 });
+
+	const fileId = c.req.param('id');
+	const rows = await db
+		.select()
+		.from(schema.files)
+		.where(
+			and(
+				eq(schema.files.id, fileId),
+				eq(schema.files.workspace_id, sc.workspace_id),
+				isNull(schema.files.revoked_at),
+			),
+		)
+		.limit(1);
+	const file = rows[0];
+	if (!file || !file.current_version_id) {
+		return new Response('not found', { status: 404 });
+	}
+
+	const vrows = await db
+		.select()
+		.from(schema.file_versions)
+		.where(eq(schema.file_versions.id, file.current_version_id))
+		.limit(1);
+	const version = vrows[0];
+	if (!version) return new Response('not found', { status: 404 });
+
+	// Conditional GET via sha256 ETag — file content is immutable per version,
+	// so the client can cache aggressively across page loads.
+	const etag = `"${version.sha256_hex}"`;
+	if (c.req.header('if-none-match') === etag) {
+		return new Response(null, { status: 304, headers: { etag } });
+	}
+
+	const obj = await getObject(c.env, version.r2_key);
+	const fname = sanitizeFilename(file.name);
+
+	return new Response(obj.bytes, {
+		headers: {
+			'content-type': file.mime_type || 'application/octet-stream',
+			'content-disposition': `inline; filename="${fname}"`,
+			'cache-control': 'private, max-age=300',
+			etag,
 		},
 	});
 });

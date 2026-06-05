@@ -20,6 +20,13 @@ type TemplateRow = typeof templates.$inferSelect;
 type WorkspaceRow = typeof workspaces.$inferSelect;
 type CommentRow = typeof comments.$inferSelect;
 
+export type FileSummary = {
+	id: string;
+	name: string;
+	mime_type: string;
+	size_bytes: number;
+};
+
 export type RenderInput = {
 	workspace: WorkspaceRow;
 	list: ListRow;
@@ -27,6 +34,13 @@ export type RenderInput = {
 	items: ItemRow[];
 	/** comments keyed by item_id (latest 10 per item). */
 	commentsByItem?: Record<string, CommentRow[]>;
+	/**
+	 * Files referenced by attachment-typed fields on visible items, keyed by
+	 * file id. Pre-loaded by the caller (single batched SQL query) so the
+	 * renderer stays pure. Missing entries are rendered as a soft "unavailable"
+	 * placeholder.
+	 */
+	filesById?: Record<string, FileSummary>;
 	share_code: string;
 	view_url: string;
 	/** Granted permissions for this visitor (from the share code). */
@@ -69,6 +83,7 @@ export function renderRoadmap(input: RenderInput): string {
 	const { workspace, list, template, items, share_code, view_url } = input;
 	const permissions = input.permissions ?? ['read'];
 	const commentsByItem = input.commentsByItem ?? {};
+	const filesById = input.filesById ?? {};
 	const meta = list.meta_json as ListMeta;
 	const schemaFields: FieldDef[] = (template?.fields_schema_json as FieldDef[]) ?? [];
 	const stateField = schemaFields.find((f) => f.key === 'state' && f.type === 'single_select');
@@ -162,6 +177,7 @@ export function renderRoadmap(input: RenderInput): string {
 			${renderItemsForView(view, {
 				stateOrder, groups, noState, terminalStates, schemaFields, can, stateField,
 				shareCode: share_code, commentsByItem, displayName: input.display_name, items,
+				filesById,
 			})}
 		</section>
 
@@ -310,8 +326,9 @@ function renderGroups(
 	shareCode: string,
 	commentsByItem: Record<string, CommentRow[]>,
 	displayName: string | undefined,
+	filesById: Record<string, FileSummary>,
 ): string {
-	const args = { schemaFields, can, stateField, shareCode, commentsByItem, displayName };
+	const args = { schemaFields, can, stateField, shareCode, commentsByItem, displayName, filesById };
 	const renderedGroups: string[] = [];
 	for (const state of stateOrder) {
 		const arr = groups.get(state) ?? [];
@@ -361,16 +378,26 @@ type ItemRenderArgs = {
 	shareCode: string;
 	commentsByItem: Record<string, CommentRow[]>;
 	displayName: string | undefined;
+	filesById: Record<string, FileSummary>;
 };
 
 function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): string {
-	const { schemaFields, can, stateField, shareCode, commentsByItem, displayName } = args;
+	const { schemaFields, can, stateField, shareCode, commentsByItem, displayName, filesById } = args;
 	const fields = item.fields_json as Record<string, unknown>;
+	// Attachment fields render their own block — keep them out of the chip row.
+	const attachmentKeys = new Set(schemaFields.filter((f) => f.type === 'attachment').map((f) => f.key));
 	const interesting = schemaFields
-		.filter((f) => f.key !== 'state' && fields[f.key] !== undefined && fields[f.key] !== null)
+		.filter(
+			(f) =>
+				f.key !== 'state' &&
+				!attachmentKeys.has(f.key) &&
+				fields[f.key] !== undefined &&
+				fields[f.key] !== null,
+		)
 		.slice(0, 5);
 	const itemComments = commentsByItem[item.id] ?? [];
 	const currentState = typeof fields.state === 'string' ? fields.state : null;
+	const attachmentsHtml = renderAttachments(schemaFields, fields, filesById, shareCode, 'card');
 	return `
 		<article class="card tone-${tone}">
 			<div class="card-accent"></div>
@@ -388,6 +415,7 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 								.join('')}</div>`
 						: ''
 				}
+				${attachmentsHtml}
 				${
 					can.edit && stateField && stateField.options
 						? renderStateEditForm(item.id, shareCode, stateField, currentState)
@@ -398,6 +426,59 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 			</div>
 		</article>
 	`;
+}
+
+/**
+ * Render attachment-typed fields as a block of <img> tags (for images) and
+ * chip links (for other mime types). All bytes are streamed via the
+ * /r/<code>/file/<id> route — no inline data URIs in v0.5 (browser cache +
+ * ETag handle revisits).
+ *
+ * variant='card' uses larger thumbnails; variant='kanban' uses compact ones.
+ */
+function renderAttachments(
+	schemaFields: FieldDef[],
+	fields: Record<string, unknown>,
+	filesById: Record<string, FileSummary>,
+	shareCode: string,
+	variant: 'card' | 'kanban',
+): string {
+	const parts: string[] = [];
+	for (const def of schemaFields) {
+		if (def.type !== 'attachment') continue;
+		const raw = fields[def.key];
+		if (raw === undefined || raw === null) continue;
+		const ids = Array.isArray(raw) ? raw : [raw];
+		for (const id of ids) {
+			if (typeof id !== 'string') continue;
+			const file = filesById[id];
+			if (!file) {
+				parts.push(
+					`<span class="att-chip att-missing" title="${escape(def.label ?? def.key)}">📎 (file unavailable)</span>`,
+				);
+				continue;
+			}
+			const url = `/r/${encodeURIComponent(shareCode)}/file/${encodeURIComponent(file.id)}`;
+			const isImage = file.mime_type.startsWith('image/');
+			if (isImage) {
+				parts.push(
+					`<a class="att-img-wrap att-${variant}" href="${url}" target="_blank" rel="noopener" title="${escape(file.name)}"><img class="att-img" loading="lazy" decoding="async" src="${url}" alt="${escape(file.name)}" /></a>`,
+				);
+			} else {
+				parts.push(
+					`<a class="att-chip" href="${url}" target="_blank" rel="noopener" title="${escape(file.name)}">📎 <span class="att-name">${escape(file.name)}</span><span class="att-size">${formatBytes(file.size_bytes)}</span></a>`,
+				);
+			}
+		}
+	}
+	if (parts.length === 0) return '';
+	return `<div class="attachments att-${variant}">${parts.join('')}</div>`;
+}
+
+function formatBytes(n: number): string {
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function renderHeaderCaps(
@@ -435,12 +516,13 @@ type ViewArgs = {
 	commentsByItem: Record<string, CommentRow[]>;
 	displayName: string | undefined;
 	items: ItemRow[];
+	filesById: Record<string, FileSummary>;
 };
 
 function renderItemsForView(view: ImplementedView, args: ViewArgs): string {
 	switch (view) {
 		case 'list':
-			return renderGroups(args.stateOrder, args.groups, args.noState, args.terminalStates, args.schemaFields, args.can, args.stateField, args.shareCode, args.commentsByItem, args.displayName);
+			return renderGroups(args.stateOrder, args.groups, args.noState, args.terminalStates, args.schemaFields, args.can, args.stateField, args.shareCode, args.commentsByItem, args.displayName, args.filesById);
 		case 'kanban':
 			return renderKanbanView(args);
 		case 'table':
@@ -489,11 +571,19 @@ function renderKanbanView(args: ViewArgs): string {
 
 function renderKanbanCard(item: ItemRow, tone: StateTone, args: ViewArgs): string {
 	const fields = item.fields_json as Record<string, unknown>;
+	const attachmentKeys = new Set(args.schemaFields.filter((f) => f.type === 'attachment').map((f) => f.key));
 	const interesting = args.schemaFields
-		.filter((f) => f.key !== 'state' && fields[f.key] !== undefined && fields[f.key] !== null)
+		.filter(
+			(f) =>
+				f.key !== 'state' &&
+				!attachmentKeys.has(f.key) &&
+				fields[f.key] !== undefined &&
+				fields[f.key] !== null,
+		)
 		.slice(0, 3);
 	const commentCount = (args.commentsByItem[item.id] ?? []).length;
 	const draggable = args.can.edit ? 'true' : 'false';
+	const attachmentsHtml = renderAttachments(args.schemaFields, fields, args.filesById, args.shareCode, 'kanban');
 	return `
 		<article class="kanban-card tone-${tone}" draggable="${draggable}" data-item-id="${escape(item.id)}">
 			<div class="kanban-card-head">
@@ -502,6 +592,7 @@ function renderKanbanCard(item: ItemRow, tone: StateTone, args: ViewArgs): strin
 			</div>
 			<div class="kanban-card-title">${escape(item.title)}</div>
 			${item.body ? `<p class="kanban-card-desc">${escape(item.body)}</p>` : ''}
+			${attachmentsHtml}
 			${interesting.length > 0 ? `<div class="kanban-card-chips">${interesting.map((f) => fieldChip(f, fields[f.key])).join('')}</div>` : ''}
 		</article>
 	`;
@@ -1749,6 +1840,50 @@ main {
 }
 
 .card-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+
+/* Attachments (BL-021 follow-on) — inline thumbnails + chips for non-images */
+.attachments {
+	display: flex; flex-wrap: wrap; gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+.attachments.att-kanban { gap: 4px; margin-top: 6px; }
+.att-img-wrap {
+	display: inline-block;
+	border-radius: 8px; overflow: hidden;
+	border: 1px solid var(--border-1);
+	background: var(--bg-2);
+	transition: border-color 120ms ease, transform 120ms ease;
+}
+.att-img-wrap:hover { border-color: var(--border-2); transform: translateY(-1px); }
+.att-img-wrap.att-card .att-img {
+	display: block;
+	max-width: 220px; max-height: 160px;
+	width: auto; height: auto;
+	object-fit: cover;
+}
+.att-img-wrap.att-kanban .att-img {
+	display: block;
+	max-width: 100%; max-height: 96px;
+	width: 100%; height: auto;
+	object-fit: cover;
+}
+.att-chip {
+	display: inline-flex; align-items: center; gap: 6px;
+	padding: 3px 8px;
+	background: var(--bg-2); color: var(--fg-2);
+	border-radius: 6px;
+	font-size: 11.5px;
+	text-decoration: none;
+	border: 1px solid var(--border-1);
+}
+.att-chip:hover { background: var(--bg-3); border-color: var(--border-2); }
+.att-chip .att-name { font-weight: 500; }
+.att-chip .att-size {
+	color: var(--fg-3); font-family: var(--font-mono); font-size: 10.5px;
+}
+.att-chip.att-missing { color: var(--fg-3); font-style: italic; cursor: default; }
+.attachments.att-kanban .att-chip { font-size: 10.5px; padding: 2px 6px; }
+
 .chip {
 	display: inline-flex; align-items: center; gap: 6px;
 	padding: 2px 8px;

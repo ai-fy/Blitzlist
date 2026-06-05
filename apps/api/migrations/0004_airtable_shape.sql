@@ -208,7 +208,8 @@ SELECT hex(randomblob(16)), w.id, 'bugs', 'Bugs',
     {"key":"severity","type":"single_select","label":"Severity","options":["critical","high","medium","low"],"default":"medium"},
     {"key":"reporter","type":"user","label":"Reporter"},
     {"key":"accountable","type":"user","label":"Accountable"},
-    {"key":"repro_steps","type":"long_text","label":"Reproduction steps"}
+    {"key":"repro_steps","type":"long_text","label":"Reproduction steps"},
+    {"key":"screenshot","type":"attachment","label":"Screenshot","description":"Optional image illustrating the defect."}
   ]'), 1, unixepoch(), unixepoch()
 FROM workspaces w;
 

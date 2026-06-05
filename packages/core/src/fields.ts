@@ -39,6 +39,7 @@ export type FieldDef = {
 
 const URL_RX = /^https?:\/\/[^\s]+$/i;
 const ISO_DATE_RX = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Validate a single field value against its type. Throws on mismatch.
@@ -134,10 +135,19 @@ export function validateFieldValue(def: FieldDef, value: unknown): unknown {
 			throw new Error(`Field "${def.key}" expects an item ID string or array of item IDs`);
 		}
 		case 'attachment': {
-			if (typeof value !== 'string') {
-				throw new Error(`Field "${def.key}" expects an R2 object key string`);
+			// Stores file_id(s) — pure shape check here; existence/workspace
+			// scope is verified at the tool layer (BL-021). Accepts a single
+			// uuid or an array of uuids (forward-looking for multi-attach).
+			if (typeof value === 'string') {
+				if (!UUID_RX.test(value)) {
+					throw new Error(`Field "${def.key}" expects a file_id (uuid)`);
+				}
+				return value;
 			}
-			return value;
+			if (Array.isArray(value) && value.every((v) => typeof v === 'string' && UUID_RX.test(v))) {
+				return value;
+			}
+			throw new Error(`Field "${def.key}" expects a file_id (uuid) or array of file_ids`);
 		}
 		case 'formula': {
 			// Computed; not writable. Reject explicit writes.
