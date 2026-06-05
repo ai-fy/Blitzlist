@@ -31,6 +31,13 @@ export type FieldDef = {
 	default?: unknown;
 	options?: string[];
 	terminal?: string[];
+	/**
+	 * When true (single_select / multi_select), values outside `options` are
+	 * accepted. The tool layer is responsible for persisting novel values
+	 * somewhere appropriate (e.g. list-level extras for the state field).
+	 * Defaults to false (strict enum).
+	 */
+	open?: boolean;
 	min?: number;
 	max?: number;
 	multiline?: boolean;
@@ -44,8 +51,19 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /**
  * Validate a single field value against its type. Throws on mismatch.
  * Returns the (possibly normalized) value to store.
+ *
+ * `extras` is an optional per-field augmentation to the declared `options`
+ * (used by the canonical state field: list.meta_json.extra_state_options).
+ * When `def.open` is true OR the value is found in `options + extras`, the
+ * enum check is satisfied. When `def.open` is true the value is accepted
+ * even if it's not in either set — the caller is then responsible for
+ * recording it (e.g. appending to list-level extras).
  */
-export function validateFieldValue(def: FieldDef, value: unknown): unknown {
+export function validateFieldValue(
+	def: FieldDef,
+	value: unknown,
+	extras?: { options?: string[] },
+): unknown {
 	// null / undefined permitted unless required at the parent level.
 	if (value === null || value === undefined) return null;
 
@@ -86,7 +104,8 @@ export function validateFieldValue(def: FieldDef, value: unknown): unknown {
 			if (typeof value !== 'string') {
 				throw new Error(`Field "${def.key}" expects a string (got ${typeof value})`);
 			}
-			const allowed = def.options ?? [];
+			const allowed = effectiveOptions(def, extras);
+			if (def.open) return value; // open enum — anything string-ish accepted
 			if (allowed.length > 0 && !allowed.includes(value)) {
 				throw new Error(
 					`Field "${def.key}" must be one of: ${allowed.join(', ')} (got "${value}")`,
@@ -98,11 +117,12 @@ export function validateFieldValue(def: FieldDef, value: unknown): unknown {
 			if (!Array.isArray(value)) {
 				throw new Error(`Field "${def.key}" expects an array (got ${typeof value})`);
 			}
-			const allowed = def.options ?? [];
+			const allowed = effectiveOptions(def, extras);
 			for (const v of value) {
 				if (typeof v !== 'string') {
 					throw new Error(`Field "${def.key}" array items must be strings`);
 				}
+				if (def.open) continue; // open enum — any string accepted
 				if (allowed.length > 0 && !allowed.includes(v)) {
 					throw new Error(
 						`Field "${def.key}" values must be one of: ${allowed.join(', ')} (got "${v}")`,
@@ -161,18 +181,45 @@ export function validateFieldValue(def: FieldDef, value: unknown): unknown {
 }
 
 /**
+ * Effective option set for a single_select / multi_select field:
+ * the declared `options` plus any caller-supplied `extras.options`
+ * (typically list-level extras for the canonical state field).
+ */
+export function effectiveOptions(
+	def: FieldDef,
+	extras?: { options?: string[] },
+): string[] {
+	const base = def.options ?? [];
+	const extra = extras?.options ?? [];
+	if (extra.length === 0) return base;
+	const seen = new Set(base);
+	const out = [...base];
+	for (const v of extra) {
+		if (!seen.has(v)) {
+			seen.add(v);
+			out.push(v);
+		}
+	}
+	return out;
+}
+
+/**
  * Validate a partial fields_json patch against the template schema. Returns
  * the merged-and-normalized fields_json. `isCreate=true` enforces `required`
  * on all fields; `isCreate=false` only validates types/options on fields that
  * are present (partial-update semantics).
+ *
+ * `extrasByKey` lets the caller pass list-level option extras keyed by field.
+ * Typically: { state: { options: list.meta_json.extra_state_options ?? [] } }.
  */
 export function validateItemFields(opts: {
 	schema: FieldDef[];
 	current?: Record<string, unknown>;
 	patch: Record<string, unknown>;
 	isCreate: boolean;
+	extrasByKey?: Record<string, { options?: string[] }>;
 }): Record<string, unknown> {
-	const { schema, current = {}, patch, isCreate } = opts;
+	const { schema, current = {}, patch, isCreate, extrasByKey = {} } = opts;
 	const byKey = new Map(schema.map((f) => [f.key, f]));
 
 	// 1. Reject unknown keys in the patch.
@@ -201,7 +248,7 @@ export function validateItemFields(opts: {
 	// 3. Validate each provided value.
 	for (const [key, raw] of Object.entries(patch)) {
 		const def = byKey.get(key)!;
-		merged[key] = validateFieldValue(def, raw);
+		merged[key] = validateFieldValue(def, raw, extrasByKey[key]);
 	}
 
 	// 4. On create, enforce `required`.
@@ -214,6 +261,21 @@ export function validateItemFields(opts: {
 	}
 
 	return merged;
+}
+
+/**
+ * Given a single_select field and a new value, return the value if it's
+ * not yet in `options + extras` (i.e. it's a novel value the caller needs
+ * to record), or null if it's already known.
+ */
+export function novelOptionValue(
+	def: FieldDef,
+	value: string,
+	extras?: { options?: string[] },
+): string | null {
+	if (def.type !== 'single_select' && def.type !== 'multi_select') return null;
+	const known = new Set(effectiveOptions(def, extras));
+	return known.has(value) ? null : value;
 }
 
 /**

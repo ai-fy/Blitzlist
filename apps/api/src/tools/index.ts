@@ -8,6 +8,7 @@
  *
  *   Lists:
  *     create_list                                   — create a list (with optional template)
+ *     update_list                                   — rename / re-slug / edit metadata (BL-022)
  *     close_list                                    — close + run delivered/slipped/cut audit
  *     generate_release_notes                        — Markdown notes from a list's breakdown
  *
@@ -47,6 +48,12 @@
  *   - add_items({list, items:[...]})                batch-add to existing list in 1 call
  *   - set_states({changes:[...]})                   batch state transitions in 1 call
  *   - update_items({updates:[...]})                 batch field/title/body updates in 1 call
+ *
+ * ⚠️ When asked to operate on MULTIPLE items, ALWAYS prefer the batch
+ * variant (add_items / update_items / set_states) over N parallel calls
+ * to the singular tool. Batch tools are atomic (fail-fast), use one
+ * server round-trip, and one user approval. Keywords for tool search:
+ * "batch", "bulk", "multiple", "many", "mass", "multi-item".
  */
 
 import { createToolRegistry } from '@blitzlist/mcp';
@@ -55,6 +62,7 @@ import type { WorkspaceToolCtx } from '../workspace-context.js';
 
 import { listTemplates } from './list-templates.js';
 import { createList } from './create-list.js';
+import { updateList } from './update-list.js';
 import { closeList } from './close-list.js';
 import { generateReleaseNotes } from './generate-release-notes.js';
 import { setListDefaultView } from './set-list-default-view.js';
@@ -84,6 +92,7 @@ import { deleteFile } from './delete-file.js';
 export const toolRegistry = createToolRegistry<Db, WorkspaceToolCtx>([
 	listTemplates,
 	createList,
+	updateList,
 	closeList,
 	generateReleaseNotes,
 	setListDefaultView,

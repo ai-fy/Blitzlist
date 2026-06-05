@@ -13,6 +13,7 @@
 
 import type { lists, items, templates, workspaces, comments } from '@blitzlist/db';
 import type { DefaultView, FieldDef, ListMeta, StakeholderPermission } from '@blitzlist/db';
+import { renderMarkdown } from '../markdown.js';
 
 type ListRow = typeof lists.$inferSelect;
 type ItemRow = typeof items.$inferSelect;
@@ -87,7 +88,13 @@ export function renderRoadmap(input: RenderInput): string {
 	const meta = list.meta_json as ListMeta;
 	const schemaFields: FieldDef[] = (template?.fields_schema_json as FieldDef[]) ?? [];
 	const stateField = schemaFields.find((f) => f.key === 'state' && f.type === 'single_select');
-	const stateOrder = stateField?.options ?? [];
+	// Effective state options = template declared options + per-list extras
+	// (BL-022 open state enum). Extras appended in order of first appearance;
+	// declared options keep their order.
+	const listExtras = meta.extra_state_options ?? [];
+	const stateOrder = stateField
+		? mergeOptions(stateField.options ?? [], listExtras)
+		: [];
 	const terminalStates = new Set(stateField?.terminal ?? []);
 	const can = {
 		comment: permissions.includes('comment'),
@@ -181,7 +188,7 @@ export function renderRoadmap(input: RenderInput): string {
 			})}
 		</section>
 
-		${can.create ? renderNewItemForm(share_code, input.display_name, stateField) : ''}
+		${can.create ? renderNewItemForm(share_code, input.display_name, stateField, stateOrder) : ''}
 	</main>
 
 	<footer>
@@ -328,7 +335,7 @@ function renderGroups(
 	displayName: string | undefined,
 	filesById: Record<string, FileSummary>,
 ): string {
-	const args = { schemaFields, can, stateField, shareCode, commentsByItem, displayName, filesById };
+	const args = { schemaFields, can, stateField, stateOptions: stateOrder, shareCode, commentsByItem, displayName, filesById };
 	const renderedGroups: string[] = [];
 	for (const state of stateOrder) {
 		const arr = groups.get(state) ?? [];
@@ -375,6 +382,8 @@ type ItemRenderArgs = {
 	schemaFields: FieldDef[];
 	can: Capabilities;
 	stateField: FieldDef | undefined;
+	/** Effective state options for THIS list = template options ∪ list extras. */
+	stateOptions: string[];
 	shareCode: string;
 	commentsByItem: Record<string, CommentRow[]>;
 	displayName: string | undefined;
@@ -407,7 +416,7 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 					<h3 class="card-title">${escape(item.title)}</h3>
 					<code class="card-id">${escape(item.id)}</code>
 				</div>
-				${item.body ? `<p class="card-desc">${escape(truncate(item.body, 280))}</p>` : ''}
+				${item.body ? `<div class="card-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 				${
 					interesting.length > 0
 						? `<div class="card-fields">${interesting
@@ -417,8 +426,8 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 				}
 				${attachmentsHtml}
 				${
-					can.edit && stateField && stateField.options
-						? renderStateEditForm(item.id, shareCode, stateField, currentState)
+					can.edit && stateField && args.stateOptions.length > 0
+						? renderStateEditForm(item.id, shareCode, args.stateOptions, currentState)
 						: ''
 				}
 				${itemComments.length > 0 ? renderComments(itemComments) : ''}
@@ -523,6 +532,7 @@ function renderItemsForView(view: ImplementedView, args: ViewArgs): string {
 	switch (view) {
 		case 'list':
 			return renderGroups(args.stateOrder, args.groups, args.noState, args.terminalStates, args.schemaFields, args.can, args.stateField, args.shareCode, args.commentsByItem, args.displayName, args.filesById);
+		// (stateOrder IS the effective options; renderGroups passes it as stateOptions on args)
 		case 'kanban':
 			return renderKanbanView(args);
 		case 'table':
@@ -537,9 +547,8 @@ function renderItemsForView(view: ImplementedView, args: ViewArgs): string {
 function renderKanbanView(args: ViewArgs): string {
 	const cols: string[] = [];
 	const ordered = args.stateOrder.length > 0 ? args.stateOrder : Array.from(args.groups.keys());
-	for (const state of ordered) {
-		const arr = args.groups.get(state) ?? [];
-		const tone: StateTone = args.terminalStates.has(state) ? 'shipped' : stateTone(state);
+	const seen = new Set<string>();
+	const emitCol = (state: string, arr: ItemRow[], tone: StateTone) => {
 		cols.push(`
 			<div class="kanban-col" data-state="${escape(state)}" data-tone="${tone}">
 				<div class="kanban-col-header">
@@ -549,6 +558,35 @@ function renderKanbanView(args: ViewArgs): string {
 				<div class="kanban-col-cards">
 					${arr.map((it) => renderKanbanCard(it, tone, args)).join('') || '<div class="kanban-empty">—</div>'}
 				</div>
+			</div>
+		`);
+	};
+	for (const state of ordered) {
+		seen.add(state);
+		const arr = args.groups.get(state) ?? [];
+		const tone: StateTone = args.terminalStates.has(state) ? 'shipped' : stateTone(state);
+		emitCol(state, arr, tone);
+	}
+	// Surface any in-the-wild state values that aren't in the declared options
+	// or extras yet (BL-022 open enum — defensive). Tone neutral.
+	for (const [state, arr] of args.groups) {
+		if (seen.has(state) || arr.length === 0) continue;
+		seen.add(state);
+		emitCol(state, arr, 'neutral');
+	}
+	// BL-022: edit-permission visitors can spawn a new column for an arbitrary
+	// state value. The form POSTs to /r/:code/state-option which appends to
+	// list.meta_json.extra_state_options and reloads.
+	if (args.can.edit && args.stateField?.open) {
+		cols.push(`
+			<div class="kanban-col kanban-col-add">
+				<details class="add-state">
+					<summary aria-label="Add a new state column">+ add column</summary>
+					<form method="POST" action="/r/${escape(args.shareCode)}/state-option">
+						<input type="text" name="state" placeholder="e.g. estimating" maxlength="40" required pattern="[A-Za-z0-9_][A-Za-z0-9_\\- ]*" title="Letters, digits, dash, underscore, space" />
+						<button type="submit">Add</button>
+					</form>
+				</details>
 			</div>
 		`);
 	}
@@ -591,7 +629,7 @@ function renderKanbanCard(item: ItemRow, tone: StateTone, args: ViewArgs): strin
 				${commentCount > 0 ? `<span class="kanban-card-comments">${SPEECH_ICON}${commentCount}</span>` : ''}
 			</div>
 			<div class="kanban-card-title">${escape(item.title)}</div>
-			${item.body ? `<p class="kanban-card-desc">${escape(item.body)}</p>` : ''}
+			${item.body ? `<div class="kanban-card-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 			${attachmentsHtml}
 			${interesting.length > 0 ? `<div class="kanban-card-chips">${interesting.map((f) => fieldChip(f, fields[f.key])).join('')}</div>` : ''}
 		</article>
@@ -676,7 +714,7 @@ function renderTableRow(item: ItemRow, cols: Array<{ key: string; label: string;
 	}).join('');
 	const summaryRow = `<tr class="item-row ${hasBody ? 'has-detail' : ''}" data-item-id="${escape(item.id)}">${tds}</tr>`;
 	const detailRow = hasBody
-		? `<tr class="detail-row" data-detail-for="${escape(item.id)}"><td colspan="${cols.length}"><div class="detail-body">${escape(item.body)}</div></td></tr>`
+		? `<tr class="detail-row" data-detail-for="${escape(item.id)}"><td colspan="${cols.length}"><div class="detail-body prose">${renderMarkdown(item.body)}</div></td></tr>`
 		: '';
 	return summaryRow + detailRow;
 }
@@ -722,7 +760,7 @@ function renderTodoView(args: ViewArgs): string {
 						<span class="todo-title">${escape(item.title)}</span>
 						<code class="todo-id">${escape(item.id)}</code>
 					</div>
-					${item.body ? `<p class="todo-desc">${escape(truncate(item.body, 200))}</p>` : ''}
+					${item.body ? `<div class="todo-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 					${state ? `<div class="todo-state">${statusPill(state, tone)}</div>` : ''}
 				</div>
 			</li>
@@ -825,10 +863,10 @@ function capLabel(p: StakeholderPermission): string {
 function renderStateEditForm(
 	itemId: string,
 	shareCode: string,
-	stateField: FieldDef,
+	effectiveOptions: string[],
 	currentState: string | null,
 ): string {
-	const options = (stateField.options ?? []).map(
+	const options = effectiveOptions.map(
 		(o) => `<option value="${escape(o)}"${o === currentState ? ' selected' : ''}>${escape(humanizeState(o))}</option>`,
 	).join('');
 	return `
@@ -868,7 +906,7 @@ function renderComments(rows: CommentRow[]): string {
 			${ordered
 				.map(
 					(c) =>
-						`<div class="comment"><div class="comment-meta"><span class="comment-author">${escape(c.author_label ?? 'Anonymous')}</span><time>${escape(formatTimestamp(c.created_at))}</time></div><div class="comment-body">${escape(c.body)}</div></div>`,
+						`<div class="comment"><div class="comment-meta"><span class="comment-author">${escape(c.author_label ?? 'Anonymous')}</span><time>${escape(formatTimestamp(c.created_at))}</time></div><div class="comment-body prose">${renderMarkdown(c.body)}</div></div>`,
 				)
 				.join('')}
 		</div>
@@ -879,8 +917,9 @@ function renderNewItemForm(
 	shareCode: string,
 	displayName: string | undefined,
 	stateField: FieldDef | undefined,
+	effectiveStateOptions: string[],
 ): string {
-	const states = stateField?.options ?? [];
+	const states = effectiveStateOptions;
 	const defaultState = stateField?.default;
 	const stateSelect =
 		states.length > 0
@@ -993,11 +1032,6 @@ function formatFieldValue(v: unknown): string {
 	return String(v);
 }
 
-function truncate(s: string, max: number): string {
-	if (s.length <= max) return s;
-	return s.slice(0, max - 1).trimEnd() + '…';
-}
-
 function escape(s: string): string {
 	return s
 		.replace(/&/g, '&amp;')
@@ -1005,6 +1039,23 @@ function escape(s: string): string {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#39;');
+}
+
+/**
+ * Merge declared options with per-list extras. Declared order preserved;
+ * extras appended in their stored order, deduped against declared.
+ */
+function mergeOptions(base: string[], extras: string[]): string[] {
+	if (extras.length === 0) return base;
+	const seen = new Set(base);
+	const out = [...base];
+	for (const e of extras) {
+		if (!seen.has(e)) {
+			seen.add(e);
+			out.push(e);
+		}
+	}
+	return out;
 }
 
 // === Icons ===================================================================
@@ -1543,6 +1594,42 @@ main {
 .kanban-col-header { display: flex; align-items: center; justify-content: space-between; }
 .kanban-col-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
 .kanban-col-cards { display: flex; flex-direction: column; gap: var(--space-2); min-height: 40px; }
+
+/* "+ add column" affordance (BL-022 open state enum) */
+.kanban-col-add {
+	background: transparent;
+	border: 1px dashed var(--border-2);
+	align-items: stretch;
+}
+.kanban-col-add details { width: 100%; }
+.kanban-col-add summary {
+	cursor: pointer; list-style: none;
+	color: var(--fg-3); font-size: 13px;
+	padding: var(--space-3); text-align: center;
+	border-radius: 8px;
+	transition: color 120ms ease, background 120ms ease;
+}
+.kanban-col-add summary::-webkit-details-marker { display: none; }
+.kanban-col-add summary:hover { color: var(--accent); background: var(--bg-2); }
+.kanban-col-add details[open] summary { color: var(--fg-2); }
+.kanban-col-add form {
+	display: flex; flex-direction: column; gap: var(--space-2);
+	padding: var(--space-2) 0 0;
+}
+.kanban-col-add input[type="text"] {
+	background: var(--bg-2); color: var(--fg-1);
+	border: 1px solid var(--border-1); border-radius: 6px;
+	padding: 6px 8px; font-size: 13px;
+}
+.kanban-col-add input[type="text"]:focus {
+	outline: none; border-color: var(--accent);
+}
+.kanban-col-add button {
+	background: var(--accent); color: #000; font-weight: 600;
+	border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer;
+	font-size: 12.5px;
+}
+.kanban-col-add button:hover { filter: brightness(1.1); }
 .kanban-empty { color: var(--fg-4); font-size: 12px; font-style: italic; padding: var(--space-2); text-align: center; }
 .kanban-card {
 	background: var(--bg-2);
@@ -1571,10 +1658,11 @@ main {
 	font-size: 12.5px;
 	color: var(--fg-3);
 	line-height: 1.5;
-	display: -webkit-box;
-	-webkit-line-clamp: 3;
-	-webkit-box-orient: vertical;
+	max-height: 4.5em; /* ~3 lines */
 	overflow: hidden;
+	position: relative;
+	-webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+	mask-image: linear-gradient(to bottom, #000 60%, transparent);
 }
 .kanban-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .kanban-card-chips .chip { font-size: 10.5px; padding: 1px 6px; }
@@ -1591,9 +1679,10 @@ main {
 
 /* Click-to-expand: remove the body line-clamp + show full chips */
 .kanban-card.is-expanded .kanban-card-desc {
-	-webkit-line-clamp: unset;
-	display: block;
-	white-space: pre-wrap;
+	max-height: none;
+	overflow: visible;
+	-webkit-mask-image: none;
+	mask-image: none;
 }
 
 /* Drop target highlight — outline + background only (no layout-affecting
@@ -1835,8 +1924,6 @@ main {
 .card-desc {
 	color: var(--fg-2); font-size: 13.5px; line-height: 1.6;
 	margin-top: var(--space-2);
-	display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-	overflow: hidden;
 }
 
 .card-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
@@ -2303,7 +2390,64 @@ footer .links { display: flex; gap: var(--space-4); }
 }
 .comment-author { font-weight: 600; color: var(--fg-2); }
 .comment-meta time { color: var(--fg-4); font-family: var(--font-mono); font-size: 11px; }
-.comment-body { color: var(--fg-2); white-space: pre-wrap; }
+.comment-body { color: var(--fg-2); }
+
+/* === Markdown prose === */
+/* Applied to item bodies + comment bodies. Tight, content-density-friendly. */
+.prose { color: var(--fg-2); line-height: 1.55; }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p { margin: 0 0 var(--space-2); }
+.prose strong { color: var(--fg-1); font-weight: 600; }
+.prose em { font-style: italic; }
+.prose code {
+	font-family: var(--font-mono); font-size: 0.9em;
+	background: var(--bg-2); padding: 1px 5px; border-radius: 4px;
+	color: var(--fg-1);
+}
+.prose pre {
+	background: var(--bg-2); padding: var(--space-2) var(--space-3);
+	border-radius: 6px; overflow-x: auto;
+	margin: var(--space-2) 0;
+	border: 1px solid var(--border-1);
+}
+.prose pre code { background: transparent; padding: 0; }
+.prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.prose a:hover { color: var(--accent-bright); }
+.prose ul, .prose ol { margin: var(--space-2) 0; padding-left: 1.5em; }
+.prose li { margin: 2px 0; }
+.prose blockquote {
+	border-left: 3px solid var(--border-2);
+	margin: var(--space-2) 0;
+	padding: 2px 0 2px var(--space-3);
+	color: var(--fg-3);
+}
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+	margin: var(--space-3) 0 var(--space-2);
+	color: var(--fg-1); font-weight: 600;
+	line-height: 1.25;
+}
+.prose h1 { font-size: 18px; }
+.prose h2 { font-size: 16px; }
+.prose h3 { font-size: 14.5px; }
+.prose h4, .prose h5, .prose h6 { font-size: 13px; }
+.prose hr {
+	border: 0; border-top: 1px solid var(--border-1);
+	margin: var(--space-3) 0;
+}
+.prose img {
+	max-width: 100%; height: auto;
+	border-radius: 6px; border: 1px solid var(--border-1);
+	margin: var(--space-2) 0;
+}
+/* Compact mode for kanban / todo where space is tight */
+.kanban-card-desc.prose, .todo-desc.prose { font-size: 12.5px; }
+.kanban-card-desc.prose p { margin: 0 0 4px; }
+.kanban-card-desc.prose code { font-size: 0.85em; }
+.kanban-card-desc.prose pre { display: none; } /* code blocks too noisy in card */
+.kanban-card-desc.prose h1, .kanban-card-desc.prose h2, .kanban-card-desc.prose h3 {
+	font-size: 13px; margin: 4px 0 2px;
+}
 
 /* === New-item form === */
 .new-item-section { margin-top: var(--space-7); }

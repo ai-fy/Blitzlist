@@ -13,6 +13,7 @@ import { findStateFieldDef, validateFieldValue } from '@blitzlist/core';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 import { itemToResponse } from './_response-helper.js';
+import { recordNovelStateForItem } from './_state-extras-helper.js';
 
 type SetStateArgs = {
 	id: string;
@@ -44,7 +45,7 @@ function validate(args: unknown): SetStateArgs {
 export const setState: ToolDef<SetStateArgs, unknown, Db> = {
 	name: 'set_state',
 	description:
-		'Convenience: change an item\'s state field (the canonical single_select with terminal markers in its template). The new value must be one of the allowed options. Emits item.state_changed activity.',
+		'Change a SINGLE item\'s state field (the canonical single_select with terminal markers in its template). Emits item.state_changed activity. ⚠️ For changing the state of MORE THAN ONE item, use set_states (the batch / bulk version) — single approval, one round-trip, atomic validation.',
 	annotations: {
 		title: 'Update item state',
 		readOnlyHint: false,
@@ -109,6 +110,15 @@ export const setState: ToolDef<SetStateArgs, unknown, Db> = {
 				.update(schema.items)
 				.set({ fields_json: newFields, updated_at: now })
 				.where(and(eq(schema.items.id, args.id), eq(schema.items.workspace_id, ctx.workspace_id)));
+			// BL-022: if this is a novel state (open enum), register it as a
+			// per-list extra so future writes + the renderer know about it.
+			await recordNovelStateForItem(
+				ctx.db,
+				ctx.workspace_id,
+				args.id,
+				args.state,
+				stateField,
+			);
 		}
 
 		await ctx.db.insert(schema.activity_log).values({

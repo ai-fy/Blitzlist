@@ -13,6 +13,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { schema, type FieldDef } from '@blitzlist/db';
 import { findStateFieldDef, validateFieldValue } from '@blitzlist/core';
+import { recordNovelStateForItem } from './_state-extras-helper.js';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 
@@ -69,9 +70,9 @@ type ChangeResult =
 export const setStates: ToolDef<SetStatesArgs, unknown, Db> = {
 	name: 'set_states',
 	description:
-		'Batch-change the state of many items in one tool call (preferred over N set_state calls — single approval, fewer round-trips). Each change validates against its item\'s template state field. Validation fails the whole batch (no partial writes) so the caller can fix and retry. Max 200 changes per call.',
+		'BATCH / BULK state changes — change the state of MANY items in ONE tool call (also: multi-state, mass state change, bulk transition). Strongly preferred over N set_state calls — single approval, fewer round-trips, atomic validation. Each change validates against its item\'s template state field. Validation fails the WHOLE batch (no partial writes) so the caller can fix and retry. Up to 200 changes per call. If you need to change other fields too (title, body, arbitrary fields), use update_items instead.',
 	annotations: {
-		title: 'Update multiple item states',
+		title: 'Set item states (batch / bulk / multi-item)',
 		readOnlyHint: false,
 		destructiveHint: false,
 		idempotentHint: true,
@@ -217,6 +218,14 @@ export const setStates: ToolDef<SetStatesArgs, unknown, Db> = {
 							eq(schema.items.workspace_id, ctx.workspace_id),
 						),
 					);
+				// BL-022: register novel state values as per-list extras.
+				await recordNovelStateForItem(
+					ctx.db,
+					ctx.workspace_id,
+					r.id,
+					r.state,
+					r.stateField,
+				);
 			}
 			await ctx.db.insert(schema.activity_log).values({
 				id: uuid(),

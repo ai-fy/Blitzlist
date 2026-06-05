@@ -10,7 +10,8 @@
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { schema, type FieldDef } from '@blitzlist/db';
-import { validateItemFields } from '@blitzlist/core';
+import { validateItemFields, findStateFieldDef } from '@blitzlist/core';
+import { recordNovelStateForItem } from './_state-extras-helper.js';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 
@@ -85,9 +86,9 @@ function validate(args: unknown): UpdateItemsArgs {
 export const updateItems: ToolDef<UpdateItemsArgs, unknown, Db> = {
 	name: 'update_items',
 	description:
-		'Batch-update many items in one tool call. For each: optionally patch title, body, and/or fields. Fields validated against each item\'s template; unknown fields rejected. Fail-fast — if any update validates badly, NO writes happen. Per-item activity log entries. Max 200 updates per call. For pure state changes use set_states (it\'s narrower and clearer).',
+		'BATCH / BULK update many items in one tool call (also known as: multi-update, mass update, batch edit). Use this whenever you need to change more than one item — strongly preferred over multiple update_item calls. For each update: optionally patch title, body, and/or fields. Fields are validated against each item\'s template; unknown fields rejected. Fail-fast — if any single update validates badly, NO writes happen and the error explains which item failed. Per-item activity log entries are written. Up to 200 updates per call. If you only need to change the state field, use set_states (a narrower, even clearer batch tool for pure state transitions).',
 	annotations: {
-		title: 'Update multiple items',
+		title: 'Update items (batch / bulk / multi-item)',
 		readOnlyHint: false,
 		destructiveHint: false,
 		idempotentHint: true,
@@ -244,6 +245,27 @@ export const updateItems: ToolDef<UpdateItemsArgs, unknown, Db> = {
 						),
 					);
 				writtenCount++;
+
+				// BL-022: if the state field landed a novel value, register it
+				// as a per-list extra. Look up the stateField from the cached
+				// per-item template schema.
+				const item = itemById.get(r.id)!;
+				const fieldsSchema = item.template_id
+					? (schemaByTemplate.get(item.template_id) ?? [])
+					: [];
+				const stateField = findStateFieldDef(fieldsSchema);
+				if (stateField && fieldsChanged && stateField.key in r.changedFields) {
+					const newState = r.merged[stateField.key];
+					if (typeof newState === 'string') {
+						await recordNovelStateForItem(
+							ctx.db,
+							ctx.workspace_id,
+							r.id,
+							newState,
+							stateField,
+						);
+					}
+				}
 			}
 
 			await ctx.db.insert(schema.activity_log).values({

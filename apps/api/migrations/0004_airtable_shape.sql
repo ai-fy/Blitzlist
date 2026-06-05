@@ -190,7 +190,7 @@ SELECT
   'Backlog',
   'Work items moving through draft → in progress → done. Default for product backlogs.',
   json('[
-    {"key":"state","type":"single_select","label":"State","required":true,"default":"draft","options":["draft","in_progress","review","done"],"terminal":["done"]},
+    {"key":"state","type":"single_select","label":"State","open":true,"required":true,"default":"draft","options":["draft","in_progress","review","done"],"terminal":["done"]},
     {"key":"priority","type":"single_select","label":"Priority","options":["p0","p1","p2","p3"],"default":"p2"},
     {"key":"estimate","type":"text","label":"Estimate"},
     {"key":"accountable","type":"user","label":"Accountable"}
@@ -204,7 +204,7 @@ INSERT INTO templates (id, workspace_id, slug, name, description, fields_schema_
 SELECT hex(randomblob(16)), w.id, 'bugs', 'Bugs',
   'Defect tracking with triage workflow.',
   json('[
-    {"key":"state","type":"single_select","label":"State","required":true,"default":"new","options":["new","triaged","in_progress","fixed","closed","wont_fix"],"terminal":["fixed","closed","wont_fix"]},
+    {"key":"state","type":"single_select","label":"State","open":true,"required":true,"default":"new","options":["new","triaged","in_progress","fixed","closed","wont_fix"],"terminal":["fixed","closed","wont_fix"]},
     {"key":"severity","type":"single_select","label":"Severity","options":["critical","high","medium","low"],"default":"medium"},
     {"key":"reporter","type":"user","label":"Reporter"},
     {"key":"accountable","type":"user","label":"Accountable"},
@@ -218,7 +218,7 @@ INSERT INTO templates (id, workspace_id, slug, name, description, fields_schema_
 SELECT hex(randomblob(16)), w.id, 'todos', 'Todos',
   'Personal task list with due dates.',
   json('[
-    {"key":"state","type":"single_select","label":"State","required":true,"default":"todo","options":["todo","doing","done"],"terminal":["done"]},
+    {"key":"state","type":"single_select","label":"State","open":true,"required":true,"default":"todo","options":["todo","doing","done"],"terminal":["done"]},
     {"key":"due_date","type":"date","label":"Due"},
     {"key":"accountable","type":"user","label":"Accountable"}
   ]'), 1, unixepoch(), unixepoch()
@@ -229,7 +229,7 @@ INSERT INTO templates (id, workspace_id, slug, name, description, fields_schema_
 SELECT hex(randomblob(16)), w.id, 'ideas', 'Ideas',
   'Idea capture and exploration.',
   json('[
-    {"key":"state","type":"single_select","label":"State","required":true,"default":"seed","options":["seed","exploring","parked","promoted"],"terminal":["promoted","parked"]},
+    {"key":"state","type":"single_select","label":"State","open":true,"required":true,"default":"seed","options":["seed","exploring","parked","promoted"],"terminal":["promoted","parked"]},
     {"key":"excitement","type":"number","label":"Excitement (1-10)"},
     {"key":"category","type":"single_select","label":"Category","options":["product","tech","business","personal"]}
   ]'), 1, unixepoch(), unixepoch()
@@ -240,7 +240,7 @@ INSERT INTO templates (id, workspace_id, slug, name, description, fields_schema_
 SELECT hex(randomblob(16)), w.id, 'release', 'Release',
   'A versioned shipping milestone. Items are added with role=release; close_list runs the delivered/slipped/cut audit.',
   json('[
-    {"key":"state","type":"single_select","label":"State","required":true,"default":"planned","options":["planned","shipping","shipped"],"terminal":["shipped"]}
+    {"key":"state","type":"single_select","label":"State","open":true,"required":true,"default":"planned","options":["planned","shipping","shipped"],"terminal":["shipped"]}
   ]'), 1, unixepoch(), unixepoch()
 FROM workspaces w;
 
@@ -249,7 +249,7 @@ INSERT INTO templates (id, workspace_id, slug, name, description, fields_schema_
 SELECT hex(randomblob(16)), w.id, 'sprint', 'Sprint',
   'A time-boxed work period. List meta_json carries start_date/end_date.',
   json('[
-    {"key":"state","type":"single_select","label":"State","required":true,"default":"planned","options":["planned","active","closed"],"terminal":["closed"]}
+    {"key":"state","type":"single_select","label":"State","open":true,"required":true,"default":"planned","options":["planned","active","closed"],"terminal":["closed"]}
   ]'), 1, unixepoch(), unixepoch()
 FROM workspaces w;
 

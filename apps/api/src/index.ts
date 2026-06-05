@@ -50,6 +50,7 @@ import { resolveAllowedListIds } from './tools/stakeholder/_scope-helper.js';
 import { itemsToCSV, itemsToMarkdown, itemsToXLSX, sanitizeFilename } from './roadmap/export.js';
 import { renderRoadmap } from './roadmap/render.js';
 import { getObject } from './r2.js';
+import { recordNovelStateForItem, recordNovelStateForList } from './tools/_state-extras-helper.js';
 
 const VERSION = '0.1.0';
 
@@ -930,6 +931,14 @@ defaultApp.post('/r/:code/state/:item_id', async (c) => {
 			.update(schema.items)
 			.set({ fields_json: newFields, updated_at: now })
 			.where(eq(schema.items.id, itemId));
+		// BL-022: register novel state value as a per-list extra.
+		await recordNovelStateForItem(
+			db,
+			sc.workspace_id,
+			itemId,
+			newState,
+			stateField,
+		);
 	}
 	const displayName = readDisplayNameCookie(c.req.header('cookie'));
 	await db.insert(schema.activity_log).values({
@@ -1031,6 +1040,68 @@ defaultApp.post('/r/:code/view-default', async (c) => {
 	return redirectToRoadmap(sc.code, { kind: 'ok', message: `Default view set to ${newView}.` }, undefined, newView);
 });
 
+// === /r/:code/state-option — add a new kanban column / state value ==========
+//
+// BL-022: the kanban view exposes a "+ new lane" affordance for visitors with
+// edit permission. Submitting it adds the value to list.meta_json.extra_state_options
+// so the column appears, but doesn't touch any item's state. Drag items into
+// the new column afterwards.
+defaultApp.post('/r/:code/state-option', async (c) => {
+	const db = getDb(c.env);
+	const view = viewFromReferer(c.req.header('referer'));
+	const sc = await loadShareCode(db, c.req.param('code'));
+	if (!sc) return c.html(renderError('Link unavailable', 'This share link is invalid, expired, or revoked.'), 404);
+	const permissions = sc.permissions_json as StakeholderPermission[];
+	if (!permissions.includes('edit')) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This share code does not grant edit rights.' }, undefined, view);
+	}
+	const form = await readForm(c.req.raw);
+	const newState = (form.get('state') ?? '').toString().trim();
+	if (newState.length === 0 || newState.length > 40) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'State name must be 1–40 characters.' }, undefined, view);
+	}
+	// Resolve the list in scope (same logic as /r/:code render: first in scope).
+	const data = await loadExportData(db, sc);
+	if (!data || !data.list.template_id) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'No list with a template in scope.' }, undefined, view);
+	}
+	const templateRow = (
+		await db
+			.select({ fields_schema_json: schema.templates.fields_schema_json })
+			.from(schema.templates)
+			.where(eq(schema.templates.id, data.list.template_id))
+			.limit(1)
+	)[0];
+	if (!templateRow) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Template not found.' }, undefined, view);
+	}
+	const stateField = findStateFieldDef(templateRow.fields_schema_json as FieldDef[]);
+	if (!stateField) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'Template has no state field.' }, undefined, view);
+	}
+	if (!stateField.open) {
+		return redirectToRoadmap(sc.code, { kind: 'error', message: 'This template uses a closed state vocabulary.' }, undefined, view);
+	}
+	const extended = await recordNovelStateForList(
+		db,
+		sc.workspace_id,
+		data.list.id,
+		newState,
+		stateField,
+	);
+	return redirectToRoadmap(
+		sc.code,
+		{
+			kind: 'ok',
+			message: extended
+				? `Added column "${newState}".`
+				: `Column "${newState}" already exists.`,
+		},
+		undefined,
+		view,
+	);
+});
+
 defaultApp.post('/r/:code/new-item', async (c) => {
 	const db = getDb(c.env);
 	const view = viewFromReferer(c.req.header('referer'));
@@ -1080,6 +1151,7 @@ defaultApp.post('/r/:code/new-item', async (c) => {
 	// Resolve template + initial fields.
 	let templateId: string | null = listRow.template_id ?? null;
 	let fields: Record<string, unknown> = {};
+	let resolvedStateField: FieldDef | null = null;
 	if (templateId) {
 		const t = (
 			await db
@@ -1091,6 +1163,7 @@ defaultApp.post('/r/:code/new-item', async (c) => {
 		if (t) {
 			const schemaFields = t.fields_schema_json as FieldDef[];
 			const stateField = findStateFieldDef(schemaFields);
+			resolvedStateField = stateField;
 			const patch: Record<string, unknown> = {};
 			if (requestedState && stateField) {
 				try {
@@ -1152,6 +1225,21 @@ defaultApp.post('/r/:code/new-item', async (c) => {
 		},
 		created_at: now,
 	});
+
+	// BL-022: if the new item carries a novel state value, register it as a
+	// per-list extra so the kanban + state-edit dropdown see it.
+	if (resolvedStateField) {
+		const newState = fields[resolvedStateField.key];
+		if (typeof newState === 'string') {
+			await recordNovelStateForItem(
+				db,
+				sc.workspace_id,
+				itemId,
+				newState,
+				resolvedStateField,
+			);
+		}
+	}
 
 	c.executionCtx.waitUntil(
 		db

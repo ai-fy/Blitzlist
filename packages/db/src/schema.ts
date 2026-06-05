@@ -128,6 +128,13 @@ export type FieldDef = {
 	default?: unknown;
 	options?: string[]; // single_select / multi_select
 	terminal?: string[]; // single_select with workflow-state semantics
+	/**
+	 * When true (single_select / multi_select only), values outside `options`
+	 * are accepted. The tool layer is responsible for persisting the novel
+	 * value somewhere appropriate (e.g. lists.meta_json.extra_state_options
+	 * for the canonical state field). Defaults to false (strict enum).
+	 */
+	open?: boolean;
 	min?: number; // number
 	max?: number; // number
 	multiline?: boolean; // text
@@ -185,6 +192,13 @@ export type ListMeta = {
 	venue?: string;
 	// per-list default view override (wins over template.default_view)
 	default_view?: DefaultView;
+	/**
+	 * State values introduced on this list that aren't in the template's
+	 * state field options. Appended in order of first appearance. Used by
+	 * the renderer (extra kanban columns / state-edit dropdown options) and
+	 * the validator (combined with template.options as the allowed set).
+	 */
+	extra_state_options?: string[];
 	// free-form
 	[key: string]: unknown;
 };
@@ -466,8 +480,10 @@ export type ActivityAction =
 	| 'comment.created'
 	| 'workspace.created'
 	| 'list.created'
+	| 'list.updated' // BL-022 — rename / re-slug / metadata change
 	| 'list.closed' // BL-035 (replaces release.closed; runs audit when applicable)
 	| 'list.archived'
+	| 'list.state_options_extended' // BL-022 — per-list extra_state_options grew
 	| 'template.created' // BL-035
 	| 'template.field_added' // BL-035
 	| 'template.field_removed' // BL-035

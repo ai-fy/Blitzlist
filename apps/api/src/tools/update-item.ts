@@ -12,7 +12,8 @@
 
 import { and, eq } from 'drizzle-orm';
 import { schema } from '@blitzlist/db';
-import { validateItemFields } from '@blitzlist/core';
+import { validateItemFields, findStateFieldDef } from '@blitzlist/core';
+import { recordNovelStateForItem } from './_state-extras-helper.js';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 import { itemToResponse } from './_response-helper.js';
@@ -57,7 +58,7 @@ function validate(args: unknown): UpdateItemArgs {
 export const updateItem: ToolDef<UpdateItemArgs, unknown, Db> = {
 	name: 'update_item',
 	description:
-		'Patch an item\'s typed fields, title, or body. Fields are validated against the item\'s template schema; unknown fields rejected. Per-field changes are recorded in the activity log so you can see exactly what changed.',
+		'Patch a SINGLE item\'s typed fields, title, or body. Fields are validated against the item\'s template schema; unknown fields rejected. Per-field changes are recorded in the activity log so you can see exactly what changed. ⚠️ For changing MORE THAN ONE item, use update_items (the batch / bulk version) instead — it\'s atomic and one round-trip.',
 	annotations: {
 		title: 'Update item',
 		readOnlyHint: false,
@@ -156,6 +157,23 @@ export const updateItem: ToolDef<UpdateItemArgs, unknown, Db> = {
 			.update(schema.items)
 			.set(updates)
 			.where(and(eq(schema.items.id, args.id), eq(schema.items.workspace_id, ctx.workspace_id)));
+
+		// BL-022: if the patch changed the canonical state field to a novel
+		// value, register it as a per-list extra so future writes + the
+		// renderer know about it.
+		const stateField = findStateFieldDef(fields_schema);
+		if (stateField && fieldsChanged && stateField.key in changedFields) {
+			const newState = merged[stateField.key];
+			if (typeof newState === 'string') {
+				await recordNovelStateForItem(
+					ctx.db,
+					ctx.workspace_id,
+					args.id,
+					newState,
+					stateField,
+				);
+			}
+		}
 
 		// Activity rows: one item.updated header + one item.field_changed per field
 		// so timeline rendering is clean.
