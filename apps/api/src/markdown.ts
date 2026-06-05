@@ -76,6 +76,82 @@ export function renderMarkdown(text: string | null | undefined): string {
 }
 
 /**
+ * Render markdown as a single-line preview: block tags flattened to text
+ * (so `# Header` becomes plain "Header", `- item` becomes "item"), inline
+ * formatting preserved (<strong>, <em>, <code>, <a>), whitespace collapsed,
+ * truncated to `maxChars` *visible* characters with an ellipsis if cut.
+ *
+ * Used by the table view's description column, where the raw markdown
+ * syntax (`#`, `**`, `[](...)`) was leaking through as literal text.
+ */
+export function renderInlinePreview(text: string | null | undefined, maxChars: number): string {
+	if (!text || text.trim().length === 0) return '';
+	const html = renderMarkdown(text);
+	// Drop block-level tags entirely; keep inline (a/strong/em/code/s/del/u/b/i).
+	// Replace with a space so adjacent words don't fuse.
+	const stripped = html
+		.replace(/<\/?(h[1-6]|p|ul|ol|li|blockquote|pre|hr|img)\b[^>]*>/gi, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+	return truncateHtmlByVisible(stripped, maxChars);
+}
+
+/**
+ * Truncate an HTML fragment by *visible* character count (ignoring tag
+ * syntax and treating each HTML entity as one char). Closes any open
+ * inline tags at the cut point so the output stays well-formed.
+ */
+function truncateHtmlByVisible(html: string, maxChars: number): string {
+	let visible = 0;
+	let i = 0;
+	let out = '';
+	const open: string[] = [];
+	while (i < html.length) {
+		const c = html[i];
+		if (c === '<') {
+			const gt = html.indexOf('>', i);
+			if (gt === -1) break;
+			const tag = html.slice(i, gt + 1);
+			out += tag;
+			const m = /^<(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)/.exec(tag);
+			if (m && m[2]) {
+				const isClose = m[1] === '/';
+				const name = m[2].toLowerCase();
+				if (isClose) {
+					const idx = open.lastIndexOf(name);
+					if (idx >= 0) open.splice(idx, 1);
+				} else if (!tag.endsWith('/>') && !['br', 'hr', 'img'].includes(name)) {
+					open.push(name);
+				}
+			}
+			i = gt + 1;
+			continue;
+		}
+		if (c === '&') {
+			const semi = html.indexOf(';', i);
+			if (semi !== -1 && semi - i < 10) {
+				out += html.slice(i, semi + 1);
+				visible++;
+				i = semi + 1;
+				if (visible >= maxChars) return finish(out, open);
+				continue;
+			}
+		}
+		out += c;
+		visible++;
+		i++;
+		if (visible >= maxChars) return finish(out, open);
+	}
+	return out;
+}
+
+function finish(out: string, open: string[]): string {
+	let result = out + '…';
+	while (open.length > 0) result += `</${open.pop()}>`;
+	return result;
+}
+
+/**
  * Tag-level allowlist sanitizer. Walks the HTML in one pass with a simple
  * tokenizer (no DOM). For each tag we keep it if allowed, strip it if not,
  * filter its attributes against the per-tag allowlist, and rewrite dangerous

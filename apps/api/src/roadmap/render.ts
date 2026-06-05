@@ -13,7 +13,7 @@
 
 import type { lists, items, templates, workspaces, comments } from '@blitzlist/db';
 import type { DefaultView, FieldDef, ListMeta, StakeholderPermission } from '@blitzlist/db';
-import { renderMarkdown } from '../markdown.js';
+import { renderMarkdown, renderInlinePreview } from '../markdown.js';
 
 type ListRow = typeof lists.$inferSelect;
 type ItemRow = typeof items.$inferSelect;
@@ -681,9 +681,9 @@ function renderTableRow(item: ItemRow, cols: Array<{ key: string; label: string;
 		if (c.key === 'title') return `<td class="td-title">${escape(item.title)}</td>`;
 		if (c.key === '_description') {
 			if (!hasBody) return `<td class="td-empty">—</td>`;
-			const oneLine = item.body.replace(/\s+/g, ' ').trim();
-			const preview = oneLine.length > 100 ? oneLine.slice(0, 99) + '…' : oneLine;
-			return `<td class="td-desc">${escape(preview)}</td>`;
+			// Render markdown inline: bold / italic / code / links stay
+			// formatted; block markers (#, -, blank lines) flatten to text.
+			return `<td class="td-desc prose-inline">${renderInlinePreview(item.body, 100)}</td>`;
 		}
 		const value = fields[c.key];
 		if (value === null || value === undefined) return `<td class="td-empty">—</td>`;
@@ -1732,6 +1732,18 @@ main {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+/* Inline markdown preview inside table description cell — keep formatting
+   visible without blowing out the single-line constraint. */
+.items-table .td-desc.prose-inline strong { color: var(--fg-1); font-weight: 600; }
+.items-table .td-desc.prose-inline em { font-style: italic; }
+.items-table .td-desc.prose-inline code {
+	font-family: var(--font-mono); font-size: 0.9em;
+	background: var(--bg-2); padding: 0 4px; border-radius: 3px;
+	color: var(--fg-1);
+}
+.items-table .td-desc.prose-inline a {
+	color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
 }
 .items-table .item-row.is-expanded { background: var(--bg-2); }
 .items-table .detail-row { display: none; }
