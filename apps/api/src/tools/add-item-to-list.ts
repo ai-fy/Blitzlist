@@ -77,7 +77,7 @@ function validate(args: unknown): AddItemToListArgs {
 export const addItemToList: ToolDef<AddItemToListArgs, unknown, Db> = {
 	name: 'add_item_to_list',
 	description:
-		'Add an item to a list (or update its role/position if already a member). role distinguishes "primary" (the item\'s main workflow location — items have exactly one primary) from "tag" / "release" / "sprint" / "epic" / etc. Refuses to add to closed lists.',
+		'Add a SINGLE item to a list (or update its role/position if already a member). role distinguishes "primary" (the item\'s main workflow location — items have exactly one primary) from "tag" / "release" / "sprint" / "epic" / etc. Refuses to add to closed lists. ⚠️ For adding MANY items to a list (e.g. splitting / moving a batch), use add_items_to_list (the batch / bulk version) — single approval, atomic, fewer round-trips.',
 	annotations: {
 		title: 'Add item to list',
 		readOnlyHint: false,

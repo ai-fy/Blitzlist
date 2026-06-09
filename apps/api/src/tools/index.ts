@@ -27,9 +27,11 @@
  *     comment                                       — append a comment
  *
  *   Membership:
- *     add_item_to_list                              — bind item to list with role + position
- *     remove_item_from_list                         — unbind (refuses closed lists / primary
+ *     add_item_to_list                              — bind ONE item to a list with role + position
+ *     add_items_to_list                             — BATCH: bind many items to one list (BL-022)
+ *     remove_item_from_list                         — unbind ONE (refuses closed lists / primary
  *                                                     without force)
+ *     remove_items_from_list                        — BATCH: unbind many items from one list
  *
  *   Stakeholder keys (admin, BL-011):
  *     create_stakeholder_key                        — mint a key (returns raw_key ONCE)
@@ -81,7 +83,9 @@ import { setStates } from './set-states.js';
 import { setExecutor } from './set-executor.js';
 import { comment } from './comment.js';
 import { addItemToList } from './add-item-to-list.js';
+import { addItemsToList } from './add-items-to-list.js';
 import { removeItemFromList } from './remove-item-from-list.js';
+import { removeItemsFromList } from './remove-items-from-list.js';
 import { createStakeholderKey } from './create-stakeholder-key.js';
 import { revokeStakeholderKey } from './revoke-stakeholder-key.js';
 import { listStakeholderKeys } from './list-stakeholder-keys.js';
@@ -113,7 +117,9 @@ export const toolRegistry = createToolRegistry<Db, WorkspaceToolCtx>([
 	setExecutor,
 	comment,
 	addItemToList,
+	addItemsToList,
 	removeItemFromList,
+	removeItemsFromList,
 	createStakeholderKey,
 	revokeStakeholderKey,
 	listStakeholderKeys,

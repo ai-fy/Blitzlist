@@ -47,7 +47,7 @@ function validate(args: unknown): RemoveItemFromListArgs {
 export const removeItemFromList: ToolDef<RemoveItemFromListArgs, unknown, Db> = {
 	name: 'remove_item_from_list',
 	description:
-		'Remove an item\'s membership in a list. Refuses to remove primary memberships without force:true (that would orphan the item\'s workflow). Refuses to remove from closed lists (membership is the historical record). Pass note for the audit trail.',
+		'Remove a SINGLE item\'s membership in a list. Refuses to remove primary memberships without force:true (that would orphan the item\'s workflow). Refuses to remove from closed lists (membership is the historical record). Pass note for the audit trail. ⚠️ For removing MANY items from a list at once (e.g. splitting / moving / cleaning up), use remove_items_from_list (the batch / bulk version) — single approval, atomic, fewer round-trips.',
 	annotations: {
 		title: 'Remove item from list',
 		readOnlyHint: false,
