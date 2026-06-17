@@ -438,6 +438,39 @@ Keep entries terse — link to long-form docs rather than restating them here.
 - **Status:** active.
 - **References:** [apps/api/src/tools/set-state.ts](./apps/api/src/tools/set-state.ts), [apps/api/src/tools/comment.ts](./apps/api/src/tools/comment.ts), [BL-007](./blitzlist/items/BL-007-set-state-comment-tools.md).
 
+## 2026-06-17 — Agent tokens: headless write access without OAuth (BL-023)
+
+- **Decision:** Headless agents (e.g. Hermes) authenticate with a static `blz_at_` bearer token at a dedicated `/a/mcp` endpoint, resolving to the full workspace context (acting as the minting owner) but routed to a curated create/edit/share tool subset — NO admin tools (can't mint/revoke keys or revoke share codes). Owner mints via `create_agent_token` on OAuth `/mcp`. Tokens are bound per-workspace. New `agent_tokens` table, separate from `stakeholder_access_keys`.
+- **Alternatives considered:**
+  - Have the agent complete the OAuth flow once and cache the token (rejected: headless agents have no browser for the interactive consent step).
+  - Extend stakeholder keys (`/s/mcp`) with write tools (rejected: stakeholder keys are external + list-scoped and conceptually can't create new lists; "create/share" are workspace-level ops).
+  - Full owner-equivalent token, all 32 tools (rejected by malte: agent shouldn't be able to escalate/manage access).
+- **Rationale:** Reuses the proven stakeholder-key crypto/storage pattern (sha256, prefix, expiry, revoke) but with a distinct prefix + endpoint + table so the two bearer paths can't cross over. The registry IS the capability boundary — an agent token literally cannot see admin tools. Owner attribution in the activity log is honest (the owner delegated).
+- **Decided by:** malte (chose "create/edit/share, no admin" from the scope question), Claude (proposed the PAT-style design).
+- **Status:** active.
+- **References:** [apps/api/src/tools/agent/index.ts](./apps/api/src/tools/agent/index.ts), [apps/api/src/tools/create-agent-token.ts](./apps/api/src/tools/create-agent-token.ts), [packages/core/src/agent-token.ts](./packages/core/src/agent-token.ts), commit af1d500.
+
+## 2026-06-17 — Blitzlist goes full multi-tenant SaaS
+
+- **Decision:** Blitzlist becomes a full multi-tenant SaaS: real user accounts, multiple owners, each owning/joining multiple isolated workspaces, membership-driven access via `workspace_members`. Not the smaller "single-owner, multiple workspaces" option.
+- **Alternatives considered:** Single-owner multi-workspace (rejected by malte: wanted the real multi-user product, not just personal workspace isolation — accepted that it's a multi-week build).
+- **Rationale:** The data model (`users`, `workspace_members` with roles, `invite_codes`) was already shaped for tenancy; the gap was the identity layer + resolution wiring. Shipping in phases keeps each step safe and verifiable rather than one giant half-baked auth commit. Phase 1 (foundation) is mechanism-independent and permanent; only "who is the user" changes in phase 2.
+- **Decided by:** malte (after Claude flagged the multi-week scope of the full-SaaS option).
+- **Status:** active. Phase 1 shipped (commit 736ca0d): `create_workspace` / `list_workspaces`, consent-screen workspace picker, cross-tenant enforcement in `/mcp` apiHandler, data isolation verified live. Phase 3 (invites + `list_members`/`set_member_role`/`remove_member` + role gating) pending.
+- **References:** [apps/api/src/tools/create-workspace.ts](./apps/api/src/tools/create-workspace.ts), [apps/api/src/oauth/consent.ts](./apps/api/src/oauth/consent.ts), [apps/api/src/index.ts](./apps/api/src/index.ts).
+
+## 2026-06-17 — Identity / login mechanism: magic-link email
+
+- **Decision:** Human identity at the OAuth consent screen will be magic-link email (enter email → click link → authenticated). This replaces the bootstrap spike user in phase 2 of the multi-tenant work.
+- **Alternatives considered:**
+  - GitHub OAuth (rejected: no email infra needed + dev-friendly, but non-technical users need a GitHub account; malte wants broader reach).
+  - Google OAuth (rejected: broad reach but more Google-Cloud setup bureaucracy + consent-screen verification).
+  - Password auth (not chosen: self-contained but worst UX/security burden, still needs email for reset).
+- **Rationale:** Best end-user UX (no third-party account required), fits a product aimed beyond developers. Cost: needs an email sender (Workers can't send mail natively).
+- **Decided by:** malte.
+- **Status:** active, **blocked on infra.** Needs an email provider (Resend/Postmark API key + a verified sending domain) before phase 2 can be wired. The email-send will sit behind an interface so the rest of phase 2 is provider-agnostic.
+- **References:** [apps/api/src/oauth/consent.ts](./apps/api/src/oauth/consent.ts) (where login will inject the real user_id).
+
 ---
 
 ## Pending decisions (researched, not yet committed)
