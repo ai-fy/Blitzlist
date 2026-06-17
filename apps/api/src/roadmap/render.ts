@@ -418,9 +418,16 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 			<div class="card-accent"></div>
 			<div class="card-body">
 				<div class="card-head">
-					${DIAMOND_SVG_MINI(tone)}
 					<h3 class="card-title">${escape(item.title)}</h3>
-					<code class="card-id">${escape(item.id)}</code>
+					${
+						stateField && args.stateOptions.length > 0
+							? can.edit
+								? renderInlineStateSelect(item.id, stateField, args.stateOptions, currentState)
+								: currentState
+									? statusPill(currentState, tone)
+									: ''
+							: ''
+					}
 				</div>
 				${item.body ? `<div class="card-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 				${
@@ -431,11 +438,6 @@ function renderItem(item: ItemRow, tone: StateTone, args: ItemRenderArgs): strin
 						: ''
 				}
 				${attachmentsHtml}
-				${
-					can.edit && stateField && args.stateOptions.length > 0
-						? renderStateEditForm(item.id, shareCode, args.stateOptions, currentState)
-						: ''
-				}
 				${itemComments.length > 0 ? renderComments(itemComments) : ''}
 				${can.comment ? renderCommentForm(item.id, shareCode, displayName) : ''}
 			</div>
@@ -633,10 +635,7 @@ function renderKanbanCard(item: ItemRow, tone: StateTone, args: ViewArgs): strin
 	const attachmentsHtml = renderAttachments(args.schemaFields, fields, args.filesById, args.shareCode, 'kanban');
 	return `
 		<article class="kanban-card tone-${tone}" draggable="${draggable}" data-item-id="${escape(item.id)}">
-			<div class="kanban-card-head">
-				<code class="kanban-card-id">${escape(item.id)}</code>
-				${commentCount > 0 ? `<span class="kanban-card-comments">${SPEECH_ICON}${commentCount}</span>` : ''}
-			</div>
+			${commentCount > 0 ? `<div class="kanban-card-head"><span class="kanban-card-comments">${SPEECH_ICON}${commentCount}</span></div>` : ''}
 			<div class="kanban-card-title">${escape(item.title)}</div>
 			${item.body ? `<div class="kanban-card-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 			${attachmentsHtml}
@@ -651,7 +650,6 @@ function renderTableView(args: ViewArgs): string {
 	if (args.items.length === 0) return `<p class="empty">No items in this list yet.</p>`;
 	const cols: Array<{ key: string; label: string; isField: FieldDef | null }> = [
 		{ key: '_expand', label: '', isField: null },
-		{ key: 'id', label: 'ID', isField: null },
 		{ key: 'title', label: 'Title', isField: null },
 	];
 	if (args.stateField) {
@@ -661,9 +659,11 @@ function renderTableView(args: ViewArgs): string {
 	// Add up to 3 more interesting fields from the template.
 	for (const f of args.schemaFields) {
 		if (f.key === 'state') continue;
-		if (cols.length >= 8) break;
+		if (cols.length >= 7) break;
 		cols.push({ key: f.key, label: f.label ?? f.key, isField: f });
 	}
+	// ID last — least important identifier, kept out of the way at the end.
+	cols.push({ key: 'id', label: 'ID', isField: null });
 	const ordered = orderItemsByState(args.items, args.stateOrder, args.terminalStates);
 	return `
 		<div class="table-wrap">
@@ -772,7 +772,6 @@ function renderTodoView(args: ViewArgs): string {
 				<div class="todo-body">
 					<div class="todo-head">
 						<span class="todo-title">${escape(item.title)}</span>
-						<code class="todo-id">${escape(item.id)}</code>
 					</div>
 					${item.body ? `<div class="todo-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 					${state && !isDone && state !== defaultOpenState ? `<div class="todo-state">${statusPill(state, tone)}</div>` : ''}
@@ -886,22 +885,26 @@ function capText(p: StakeholderPermission): string {
 	}
 }
 
-function renderStateEditForm(
+/**
+ * Compact, auto-submitting state dropdown — same control + JS handler as the
+ * table view (.state-select). Used inline on the list-view card head.
+ */
+function renderInlineStateSelect(
 	itemId: string,
-	shareCode: string,
-	effectiveOptions: string[],
+	stateField: FieldDef,
+	options: string[],
 	currentState: string | null,
 ): string {
-	const options = effectiveOptions.map(
-		(o) => `<option value="${escape(o)}"${o === currentState ? ' selected' : ''}>${escape(humanizeState(o))}</option>`,
-	).join('');
-	return `
-		<form class="edit-state" method="POST" action="/r/${escape(shareCode)}/state/${escape(itemId)}">
-			<label>set to</label>
-			<select name="state" aria-label="Change state">${options}</select>
-			<button type="submit">apply</button>
-		</form>
-	`;
+	const terminals = stateField.terminal ?? [];
+	const toneFor = (v: string): StateTone => (terminals.includes(v) ? 'shipped' : stateTone(v));
+	const cur = currentState ?? options[0] ?? '';
+	const opts = options
+		.map(
+			(o) =>
+				`<option value="${escape(o)}" data-tone="${toneFor(o)}"${o === cur ? ' selected' : ''}>${escape(humanizeState(o))}</option>`,
+		)
+		.join('');
+	return `<select class="state-select tone-${toneFor(cur)}" data-item-id="${escape(itemId)}" aria-label="Change state">${opts}</select>`;
 }
 
 function renderCommentForm(
@@ -1137,6 +1140,34 @@ function pageScript(shareCode: string): string {
 		setTimeout(function () { el.classList.remove('is-saved'); }, 700);
 	}
 
+	// Celebratory confetti burst centred at (x, y) in viewport coords.
+	function confettiBurst(x, y) {
+		if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		var colors = ['#5b9bff', '#ffa64a', '#34e0cf', '#c061ff', '#4cb782', '#ffd400'];
+		var layer = document.createElement('div');
+		layer.className = 'confetti-layer';
+		layer.style.left = x + 'px';
+		layer.style.top = y + 'px';
+		var N = 28;
+		for (var i = 0; i < N; i++) {
+			var bit = document.createElement('i');
+			bit.className = 'confetti-bit';
+			var ang = Math.random() * Math.PI * 2;
+			var dist = 45 + Math.random() * 75;
+			bit.style.setProperty('--dx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+			bit.style.setProperty('--dy', (Math.sin(ang) * dist + 32).toFixed(1) + 'px'); // gravity bias
+			bit.style.setProperty('--rot', (Math.random() * 720 - 360).toFixed(0) + 'deg');
+			bit.style.background = colors[i % colors.length];
+			var sz = (5 + Math.random() * 6).toFixed(0);
+			bit.style.width = sz + 'px';
+			bit.style.height = sz + 'px';
+			bit.style.animationDelay = (Math.random() * 0.06).toFixed(3) + 's';
+			layer.appendChild(bit);
+		}
+		document.body.appendChild(layer);
+		setTimeout(function () { layer.remove(); }, 1050);
+	}
+
 	// === Table: editable state dropdown (no page reload) ===================
 	var TONE_RX = /tone-[a-z-]+/g;
 	document.querySelectorAll('select.state-select').forEach(function (sel) {
@@ -1192,6 +1223,9 @@ function pageScript(shareCode: string): string {
 						void item.offsetWidth; // force reflow so the animation restarts
 						item.classList.add('just-completed');
 						setTimeout(function () { item.classList.remove('just-completed'); }, 950);
+						// 🎉 confetti from the checkbox centre.
+						var cb = button.getBoundingClientRect();
+						confettiBurst(cb.left + cb.width / 2, cb.top + cb.height / 2);
 					} else {
 						item.classList.remove('is-done');
 						item.classList.remove('just-completed');
@@ -1504,10 +1538,6 @@ function pageScript(shareCode: string): string {
 
 function DIAMOND_SVG_LARGE(tone: StateTone): string {
 	return `<svg class="hero-diamond tone-${tone}" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 4l20 20-20 20L4 24 24 4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M24 14l10 10-10 10-10-10 10-10z" fill="currentColor" fill-opacity="0.15"/></svg>`;
-}
-
-function DIAMOND_SVG_MINI(tone: StateTone): string {
-	return `<svg class="card-diamond tone-${tone}" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1l6 6-6 6-6-6 6-6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
 }
 
 const STATUS_ICONS: Record<StateTone, string> = {
@@ -2018,6 +2048,28 @@ main {
 .items-table .tag.tone-neutral,
 .items-table .state-select.tone-neutral { color: var(--fg-3); }
 
+/* List-view inline state select (card head) — same control + JS as the table.
+   Tone rules use background-color (not the background shorthand) so the
+   dropdown arrow image survives. */
+.card-head .state-select {
+	font-family: var(--font-sans); font-size: 11px; font-weight: 500;
+	cursor: pointer; appearance: none; -webkit-appearance: none; flex-shrink: 0;
+	padding: 2px 22px 2px 8px; border-radius: 4px;
+	background-color: var(--bg-2); border: 1px solid var(--border);
+	background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+	background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+	background-size: 4px 4px; background-repeat: no-repeat;
+	transition: filter 0.12s ease, opacity 0.12s ease;
+}
+.card-head .state-select:hover { filter: brightness(1.1); }
+.card-head .state-select.is-pending { opacity: 0.5; cursor: progress; }
+.card-head .state-select option { background: var(--bg-elev); color: var(--fg); font-family: var(--font-sans); }
+.card-head .state-select.tone-shipped { color: var(--shipped); background-color: rgba(76, 183, 130, 0.1); border-color: rgba(76, 183, 130, 0.3); }
+.card-head .state-select.tone-on-track { color: var(--on-track); background-color: rgba(76, 183, 130, 0.08); border-color: rgba(76, 183, 130, 0.25); }
+.card-head .state-select.tone-at-risk { color: var(--at-risk); background-color: rgba(212, 160, 23, 0.08); border-color: rgba(212, 160, 23, 0.25); }
+.card-head .state-select.tone-off-track { color: var(--off-track); background-color: rgba(229, 72, 77, 0.08); border-color: rgba(229, 72, 77, 0.25); }
+.card-head .state-select.tone-neutral, .card-head .state-select.tone-pending { color: var(--fg-3); }
+
 /* === Todo view === */
 .todo-list {
 	list-style: none;
@@ -2113,6 +2165,20 @@ main {
 	.todo-item.just-completed .todo-checkbox { animation: none; }
 	.todo-title::after { transition: none; }
 }
+/* Confetti burst on completion. Layer is fixed at the checkbox; each bit
+   flies out along its own --dx/--dy and fades. JS spawns the bits. */
+.confetti-layer { position: fixed; z-index: 9998; pointer-events: none; }
+.confetti-bit {
+	position: absolute; left: 0; top: 0;
+	width: 8px; height: 8px; border-radius: 1px;
+	will-change: transform, opacity;
+	animation: confetti-fly 0.9s cubic-bezier(.18,.7,.3,1) forwards;
+}
+@keyframes confetti-fly {
+	0%   { transform: translate(0, 0) rotate(0); opacity: 1; }
+	100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .confetti-layer { display: none; } }
 .todo-desc { color: var(--fg-3); font-size: 13px; margin-top: 2px; line-height: 1.5; }
 .todo-state { margin-top: 6px; }
 
@@ -2733,7 +2799,7 @@ footer .links { display: flex; gap: var(--space-4); }
 }
 
 /* === New-item form === */
-.new-item-section { margin-top: var(--space-7); }
+.new-item-section { margin-top: var(--space-4); }
 .new-item {
 	background: var(--bg-1);
 	border: 1px dashed var(--border-bright);
