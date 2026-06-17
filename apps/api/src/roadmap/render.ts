@@ -1584,6 +1584,10 @@ main {
 
 /* === Compact top bar (Variant B) ===================================== */
 .topbar {
+	/* Override the generic header{display:flex} rule above — the topbar stacks
+	   its rows as blocks; without this they become flex items and the
+	   max-width auto margins centre everything. */
+	display: block; padding: 0;
 	position: sticky; top: 0; z-index: 5;
 	background: color-mix(in srgb, var(--bg-0) 88%, transparent);
 	backdrop-filter: saturate(1.2) blur(8px);
