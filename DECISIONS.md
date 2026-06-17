@@ -456,7 +456,7 @@ Keep entries terse — link to long-form docs rather than restating them here.
 - **Alternatives considered:** Single-owner multi-workspace (rejected by malte: wanted the real multi-user product, not just personal workspace isolation — accepted that it's a multi-week build).
 - **Rationale:** The data model (`users`, `workspace_members` with roles, `invite_codes`) was already shaped for tenancy; the gap was the identity layer + resolution wiring. Shipping in phases keeps each step safe and verifiable rather than one giant half-baked auth commit. Phase 1 (foundation) is mechanism-independent and permanent; only "who is the user" changes in phase 2.
 - **Decided by:** malte (after Claude flagged the multi-week scope of the full-SaaS option).
-- **Status:** active. Phase 1 shipped (commit 736ca0d): `create_workspace` / `list_workspaces`, consent-screen workspace picker, cross-tenant enforcement in `/mcp` apiHandler, data isolation verified live. Phase 3 (invites + `list_members`/`set_member_role`/`remove_member` + role gating) pending.
+- **Status:** active. Phase 1 shipped (736ca0d): workspace foundation. Phase 2 shipped (6fab207): magic-link login replacing the spike user — see the identity decision below. Phase 3 (invites + `list_members`/`set_member_role`/`remove_member` + role gating) pending.
 - **References:** [apps/api/src/tools/create-workspace.ts](./apps/api/src/tools/create-workspace.ts), [apps/api/src/oauth/consent.ts](./apps/api/src/oauth/consent.ts), [apps/api/src/index.ts](./apps/api/src/index.ts).
 
 ## 2026-06-17 — Identity / login mechanism: magic-link email
@@ -468,8 +468,8 @@ Keep entries terse — link to long-form docs rather than restating them here.
   - Password auth (not chosen: self-contained but worst UX/security burden, still needs email for reset).
 - **Rationale:** Best end-user UX (no third-party account required), fits a product aimed beyond developers. Cost: needs an email sender (Workers can't send mail natively).
 - **Decided by:** malte.
-- **Status:** active, **blocked on infra.** Needs an email provider (Resend/Postmark API key + a verified sending domain) before phase 2 can be wired. The email-send will sit behind an interface so the rest of phase 2 is provider-agnostic.
-- **References:** [apps/api/src/oauth/consent.ts](./apps/api/src/oauth/consent.ts) (where login will inject the real user_id).
+- **Status:** active, **shipped** (commit 6fab207, worker 2b8a11bc). Resend over `blitzlist@flowsy.de` (EMAIL_FROM var + RESEND_API_KEY secret). Send is behind a swappable interface ([email/resend.ts](./apps/api/src/email/resend.ts)). Flow: `/oauth/authorize` (no session) → login → `/auth/login` emails a one-time link → `/auth/verify` upserts user + auto-provisions a personal workspace + sets a KV-backed `bl_session` cookie → resumes the authorization.
+- **References:** [apps/api/src/auth/](./apps/api/src/auth/), [apps/api/src/email/resend.ts](./apps/api/src/email/resend.ts), [apps/api/src/oauth/consent.ts](./apps/api/src/oauth/consent.ts).
 
 ---
 
