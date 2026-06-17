@@ -152,13 +152,15 @@ export function renderRoadmap(input: RenderInput): string {
 	<div class="bg-gradient"></div>
 
 	<header>
-		<a class="brand" href="https://blitzlist.ai" rel="noopener">
-			<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="36" height="36" />
-			<span>Blitzlist</span>
-		</a>
+		<div class="brand-row">
+			<a class="brand" href="https://blitzlist.ai" rel="noopener">
+				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="28" height="28" />
+				<span>Blitzlist</span>
+			</a>
+			<span class="ws">${escape(workspace.name)}</span>
+		</div>
 		<div class="header-meta">
 			${interactive ? renderHeaderCaps(permissions, input.display_name, share_code) : ''}
-			<div class="ws">${escape(workspace.name)}</div>
 		</div>
 	</header>
 
@@ -166,19 +168,19 @@ export function renderRoadmap(input: RenderInput): string {
 		${input.flash ? `<div class="flash flash-${input.flash.kind}">${escape(input.flash.message)}</div>` : ''}
 
 		<section class="hero">
+			<div class="hero-meta-row">
+				<div class="hero-controls">
+					${renderViewSwitcher(view, listDefault, share_code, can.edit)}
+					${renderExportDropdown(share_code)}
+				</div>
+				<div class="hero-meta">${renderListMeta(meta, isClosed)}</div>
+			</div>
 			<div class="hero-row">
 				<div class="hero-glyph">${DIAMOND_SVG_LARGE(toneForList(meta, isClosed))}</div>
 				<div class="hero-text">
 					<div class="hero-eyebrow">${template ? escape(humanizeTemplate(template.slug)) : 'List'}</div>
 					<h1 class="hero-title">${escape(list.name)}</h1>
 					${list.description ? `<p class="hero-desc">${escape(list.description)}</p>` : ''}
-				</div>
-			</div>
-			<div class="hero-meta-row">
-				<div class="hero-meta">${renderListMeta(meta, isClosed)}</div>
-				<div class="hero-controls">
-					${renderViewSwitcher(view, listDefault, share_code, can.edit)}
-					${renderExportDropdown(share_code)}
 				</div>
 			</div>
 			${isClosed && breakdown ? renderBreakdown(breakdown, items, stateField) : renderLiveSummary(items, stateField)}
@@ -501,11 +503,13 @@ function renderHeaderCaps(
 ): string {
 	const capLabels = permissions
 		.filter((p) => p === 'read' || p === 'comment' || p === 'edit' || p === 'create')
-		.map((p) => `<span class="cap cap-${p}">${capLabel(p)}</span>`)
+		.map(
+			(p) =>
+				`<button type="button" class="cap cap-${p}" title="${escape(capText(p))}" aria-label="you can ${escape(capText(p))}"><span class="cap-icon" aria-hidden="true">${capIcon(p)}</span><span class="cap-text">${escape(capText(p))}</span></button>`,
+		)
 		.join('');
 	return `
 		<div class="header-caps">
-			<span class="header-caps-label">you can</span>
 			${capLabels}
 			<form class="header-signas" method="POST" action="/r/${escape(shareCode)}/identify">
 				<input type="text" name="display_name" value="${escape(displayName ?? '')}" placeholder="sign as…" maxlength="40" />
@@ -858,14 +862,26 @@ function renderExportDropdown(shareCode: string): string {
 	`;
 }
 
-function capLabel(p: StakeholderPermission): string {
+function capIcon(p: StakeholderPermission): string {
 	switch (p) {
-		case 'read': return '👁 read';
-		case 'comment': return '💬 comment';
-		case 'edit': return '✎ edit';
-		case 'create': return '+ create items';
-		case 'approve': return '✓ approve';
-		case 'vote': return '⬆ vote';
+		case 'read': return '👁';
+		case 'comment': return '💬';
+		case 'edit': return '✎';
+		case 'create': return '+';
+		case 'approve': return '✓';
+		case 'vote': return '⬆';
+		default: return '•';
+	}
+}
+
+function capText(p: StakeholderPermission): string {
+	switch (p) {
+		case 'read': return 'read';
+		case 'comment': return 'comment';
+		case 'edit': return 'edit';
+		case 'create': return 'create items';
+		case 'approve': return 'approve';
+		case 'vote': return 'vote';
 		default: return p;
 	}
 }
@@ -1069,6 +1085,14 @@ function pageScript(shareCode: string): string {
 (function () {
 	var SHARE_CODE = ${JSON.stringify(shareCode)};
 
+	// === Capability chips: tap to reveal the label (progressive disclosure) ==
+	document.querySelectorAll('.header-caps .cap').forEach(function (cap) {
+		cap.addEventListener('click', function (e) {
+			e.preventDefault();
+			cap.classList.toggle('is-revealed');
+		});
+	});
+
 	// === Dropdown close-on-outside-click + Escape =========================
 	document.addEventListener('click', function (e) {
 		document.querySelectorAll('details.export-dropdown[open]').forEach(function (d) {
@@ -1194,6 +1218,63 @@ function pageScript(shareCode: string): string {
 	// re-added by the next dragover, causing visible flicker.
 	var dragDepth = new WeakMap();
 
+	// Shared optimistic move — used by BOTH native (mouse) drop and the
+	// touch (pointer) drag below. Moves the card into the column, updates
+	// counts, POSTs the state change, reverts on failure.
+	function moveCardToColumn(card, col) {
+		var oldCol = card.closest('.kanban-col');
+		if (!oldCol || oldCol === col) return;
+		var itemId = card.dataset.itemId;
+		var newState = col.dataset.state;
+		var newTone = col.dataset.tone || 'neutral';
+		var newCardsContainer = col.querySelector('.kanban-col-cards');
+		var oldCardsContainer = oldCol.querySelector('.kanban-col-cards');
+		var oldTone = oldCol.dataset.tone || 'neutral';
+		var oldNextSibling = card.nextElementSibling;
+		var newCountEl = col.querySelector('.kanban-col-count');
+		var oldCountEl = oldCol.querySelector('.kanban-col-count');
+		var TONE_RX = /tone-[a-z-]+/g;
+		card.className = card.className.replace(TONE_RX, '').trim() + ' tone-' + newTone;
+		card.classList.add('is-pending');
+		var existingPh = newCardsContainer.querySelector('.kanban-empty');
+		if (existingPh) existingPh.remove();
+		newCardsContainer.appendChild(card);
+		if (newCountEl) newCountEl.textContent = String((parseInt(newCountEl.textContent, 10) || 0) + 1);
+		if (oldCountEl) oldCountEl.textContent = String(Math.max(0, (parseInt(oldCountEl.textContent, 10) || 0) - 1));
+		if (oldCardsContainer.children.length === 0) {
+			var ph = document.createElement('div');
+			ph.className = 'kanban-empty';
+			ph.textContent = '—';
+			oldCardsContainer.appendChild(ph);
+		}
+		postStateChange(itemId, newState)
+			.then(function () {
+				card.classList.remove('is-pending');
+				flashCell(card);
+			})
+			.catch(function (err) {
+				card.className = card.className.replace(TONE_RX, '').trim() + ' tone-' + oldTone;
+				card.classList.remove('is-pending');
+				var ph2 = oldCardsContainer.querySelector('.kanban-empty');
+				if (ph2) ph2.remove();
+				if (oldNextSibling && oldNextSibling.parentNode === oldCardsContainer) {
+					oldCardsContainer.insertBefore(card, oldNextSibling);
+				} else {
+					oldCardsContainer.appendChild(card);
+				}
+				if (newCardsContainer.children.length === 0) {
+					var newPh = document.createElement('div');
+					newPh.className = 'kanban-empty';
+					newPh.textContent = '—';
+					newCardsContainer.appendChild(newPh);
+				}
+				if (newCountEl) newCountEl.textContent = String(Math.max(0, (parseInt(newCountEl.textContent, 10) || 0) - 1));
+				if (oldCountEl) oldCountEl.textContent = String((parseInt(oldCountEl.textContent, 10) || 0) + 1);
+				console.error('kanban move failed', err);
+				alert('Could not move card: ' + err.message);
+			});
+	}
+
 	document.querySelectorAll('.kanban-card').forEach(function (card) {
 		// Click-to-expand: toggle the full body. Suppress if a drag just finished.
 		card.addEventListener('click', function (e) {
@@ -1247,69 +1328,103 @@ function pageScript(shareCode: string): string {
 			dragDepth.set(col, 0);
 			col.classList.remove('is-drop-target');
 			if (!dragging) return;
-			var itemId = dragging;
-			var newState = col.dataset.state;
-			var newTone = col.dataset.tone || 'neutral';
-			var card = document.querySelector('.kanban-card[data-item-id="' + (window.CSS && CSS.escape ? CSS.escape(itemId) : itemId) + '"]');
-			if (!card) return;
-			var oldCol = card.closest('.kanban-col');
-			if (oldCol === col) return; // dropped back into the same column — nothing to do
-
-			var newCardsContainer = col.querySelector('.kanban-col-cards');
-			var oldCardsContainer = oldCol.querySelector('.kanban-col-cards');
-			var oldTone = oldCol.dataset.tone || 'neutral';
-			var oldNextSibling = card.nextElementSibling;
-			var newCountEl = col.querySelector('.kanban-col-count');
-			var oldCountEl = oldCol.querySelector('.kanban-col-count');
-
-			// === Optimistic move ===
-			var TONE_RX = /tone-[a-z-]+/g;
-			card.className = card.className.replace(TONE_RX, '').trim() + ' tone-' + newTone;
-			card.classList.add('is-pending');
-			var existingPh = newCardsContainer.querySelector('.kanban-empty');
-			if (existingPh) existingPh.remove();
-			newCardsContainer.appendChild(card);
-			if (newCountEl) newCountEl.textContent = String((parseInt(newCountEl.textContent, 10) || 0) + 1);
-			if (oldCountEl) oldCountEl.textContent = String(Math.max(0, (parseInt(oldCountEl.textContent, 10) || 0) - 1));
-			if (oldCardsContainer.children.length === 0) {
-				var ph = document.createElement('div');
-				ph.className = 'kanban-empty';
-				ph.textContent = '—';
-				oldCardsContainer.appendChild(ph);
-			}
-
-			postStateChange(itemId, newState)
-				.then(function () {
-					card.classList.remove('is-pending');
-					flashCell(card);
-				})
-				.catch(function (err) {
-					// Revert tone
-					card.className = card.className.replace(TONE_RX, '').trim() + ' tone-' + oldTone;
-					card.classList.remove('is-pending');
-					// Revert position
-					var ph2 = oldCardsContainer.querySelector('.kanban-empty');
-					if (ph2) ph2.remove();
-					if (oldNextSibling && oldNextSibling.parentNode === oldCardsContainer) {
-						oldCardsContainer.insertBefore(card, oldNextSibling);
-					} else {
-						oldCardsContainer.appendChild(card);
-					}
-					// Re-add placeholder to target if it's empty
-					if (newCardsContainer.children.length === 0) {
-						var newPh = document.createElement('div');
-						newPh.className = 'kanban-empty';
-						newPh.textContent = '—';
-						newCardsContainer.appendChild(newPh);
-					}
-					// Revert counts
-					if (newCountEl) newCountEl.textContent = String(Math.max(0, (parseInt(newCountEl.textContent, 10) || 0) - 1));
-					if (oldCountEl) oldCountEl.textContent = String((parseInt(oldCountEl.textContent, 10) || 0) + 1);
-					console.error('kanban drop failed', err);
-					alert('Could not move card: ' + err.message);
-				});
+			var card = document.querySelector('.kanban-card[data-item-id="' + (window.CSS && CSS.escape ? CSS.escape(dragging) : dragging) + '"]');
+			if (card) moveCardToColumn(card, col);
 		});
 	});
+
+	// === Kanban: touch drag (Pointer Events) ===============================
+	// Native HTML5 drag-and-drop does not fire on touch devices. This adds a
+	// long-press-to-pick-up gesture: hold a card ~260ms (without moving, so a
+	// scroll still scrolls), a floating ghost follows the finger, and lifting
+	// over a column drops it there. Reuses moveCardToColumn.
+	(function () {
+		var LONG_PRESS = 260, CANCEL_MOVE = 12;
+		var pending = null; // { card, sx, sy, fired, timer }
+		var drag = null;     // { card, ghost, dx, dy }
+
+		function clearHighlight() {
+			document.querySelectorAll('.kanban-col.is-drop-target').forEach(function (c) {
+				c.classList.remove('is-drop-target');
+			});
+		}
+		function colUnder(x, y) {
+			var el = document.elementFromPoint(x, y);
+			return el && el.closest ? el.closest('.kanban-col[data-state]') : null;
+		}
+		function begin(card, x, y) {
+			var r = card.getBoundingClientRect();
+			var ghost = card.cloneNode(true);
+			ghost.classList.add('kanban-ghost');
+			ghost.style.position = 'fixed';
+			ghost.style.left = r.left + 'px';
+			ghost.style.top = r.top + 'px';
+			ghost.style.width = r.width + 'px';
+			ghost.style.margin = '0';
+			ghost.style.pointerEvents = 'none';
+			ghost.style.zIndex = '9999';
+			document.body.appendChild(ghost);
+			card.classList.add('is-dragging');
+			if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+			drag = { card: card, ghost: ghost, dx: x - r.left, dy: y - r.top };
+		}
+		function cancelGhost() {
+			if (drag) {
+				drag.ghost.remove();
+				drag.card.classList.remove('is-dragging');
+			}
+			clearHighlight();
+			drag = null;
+		}
+
+		document.addEventListener('pointerdown', function (e) {
+			if (e.pointerType !== 'touch') return; // mouse keeps native DnD
+			if (!e.target.closest) return;
+			if (e.target.closest('a, button, input, select, textarea, form')) return;
+			var card = e.target.closest('.kanban-card[draggable="true"]');
+			if (!card) return;
+			pending = { card: card, sx: e.clientX, sy: e.clientY, fired: false };
+			pending.timer = setTimeout(function () {
+				if (!pending) return;
+				pending.fired = true;
+				begin(pending.card, pending.sx, pending.sy);
+			}, LONG_PRESS);
+		}, { passive: true });
+
+		document.addEventListener('pointermove', function (e) {
+			if (e.pointerType !== 'touch') return;
+			if (pending && !pending.fired) {
+				// Movement before the long-press fires = scroll intent → cancel.
+				if (Math.abs(e.clientX - pending.sx) > CANCEL_MOVE || Math.abs(e.clientY - pending.sy) > CANCEL_MOVE) {
+					clearTimeout(pending.timer);
+					pending = null;
+				}
+				return;
+			}
+			if (!drag) return;
+			e.preventDefault(); // suppress scroll while dragging
+			drag.ghost.style.left = (e.clientX - drag.dx) + 'px';
+			drag.ghost.style.top = (e.clientY - drag.dy) + 'px';
+			clearHighlight();
+			var col = colUnder(e.clientX, e.clientY);
+			if (col) col.classList.add('is-drop-target');
+		}, { passive: false });
+
+		document.addEventListener('pointerup', function (e) {
+			if (pending) { clearTimeout(pending.timer); }
+			if (!drag) { pending = null; return; }
+			var col = colUnder(e.clientX, e.clientY);
+			var card = drag.card;
+			cancelGhost();
+			lastDragEndAt = Date.now(); // suppress the click-to-expand that follows
+			pending = null;
+			if (col) moveCardToColumn(card, col);
+		});
+		document.addEventListener('pointercancel', function () {
+			if (pending) { clearTimeout(pending.timer); pending = null; }
+			cancelGhost();
+		});
+	})();
 
 	// === Kanban: column-header drag-to-reorder =============================
 	// Edit-permission visitors can drag column headers to reorder the
@@ -1486,19 +1601,26 @@ header, footer, main { position: relative; z-index: 1; }
 
 header {
 	display: flex; align-items: center; justify-content: space-between;
-	padding: var(--space-4) clamp(var(--space-4), 4vw, var(--space-7));
+	gap: var(--space-3);
+	padding: var(--space-3) clamp(var(--space-4), 4vw, var(--space-7));
 	border-bottom: 1px solid var(--border);
 }
+.brand-row { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .brand {
-	display: inline-flex; align-items: center; gap: 12px;
-	font-weight: 600; font-size: 17px; color: var(--fg); letter-spacing: -0.015em;
+	display: inline-flex; align-items: center; gap: 10px;
+	font-weight: 600; font-size: 16px; color: var(--fg); letter-spacing: -0.015em;
 }
-.brand img { width: 36px; height: 36px; display: block; }
-.ws { font-size: 13px; color: var(--fg-3); }
+.brand img { width: 28px; height: 28px; display: block; }
+/* Workspace name on the same line as the brand, with a quiet divider. */
+.ws {
+	font-size: 13px; color: var(--fg-3);
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws::before { content: '/'; color: var(--fg-4); margin-right: 10px; }
 
 main {
 	flex: 1;
-	padding: clamp(var(--space-7), 8vw, var(--space-8)) clamp(var(--space-4), 5vw, var(--space-7));
+	padding: clamp(var(--space-4), 4vw, var(--space-5)) clamp(var(--space-4), 5vw, var(--space-7));
 	max-width: 1080px; margin: 0 auto; width: 100%;
 }
 
@@ -1720,8 +1842,17 @@ main {
 	gap: 6px;
 	transition: border-color 0.15s, transform 0.15s;
 	cursor: default;
+	/* Touch drag: prevent the long-press text-selection / callout from
+	   hijacking the gesture on mobile. */
+	-webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 .kanban-card:hover { border-color: var(--fg-4); transform: translateY(-1px); }
+/* Floating clone that follows the finger during a touch drag. */
+.kanban-ghost {
+	box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+	transform: rotate(1.5deg) scale(1.03);
+	opacity: 0.96;
+}
 .kanban-card.tone-shipped { border-left-color: var(--shipped); }
 .kanban-card.tone-on-track { border-left-color: var(--on-track); }
 .kanban-card.tone-at-risk { border-left-color: var(--at-risk); }
@@ -2379,13 +2510,28 @@ footer .links { display: flex; gap: var(--space-4); }
 .cap {
 	display: inline-flex;
 	align-items: center;
-	padding: 4px 12px;
+	gap: 0;
+	padding: 4px 8px;
 	border-radius: 999px;
 	font-size: 12px;
 	font-weight: 500;
 	background: var(--bg-2);
 	border: 1px solid var(--border);
 	color: var(--fg-2);
+	cursor: pointer;
+	font-family: inherit;
+	line-height: 1;
+}
+.cap .cap-icon { font-size: 12px; line-height: 1; }
+/* Icon-only by default; tap reveals the label (progressive disclosure). */
+.cap .cap-text {
+	max-width: 0; overflow: hidden; white-space: nowrap;
+	opacity: 0;
+	transition: max-width 0.22s ease, opacity 0.18s ease, margin 0.22s ease;
+}
+.cap.is-revealed .cap-text { max-width: 120px; opacity: 1; margin-left: 6px; }
+@media (hover: hover) {
+	.cap:hover .cap-text { max-width: 120px; opacity: 1; margin-left: 6px; }
 }
 .cap-read { color: var(--fg-3); }
 .cap-comment {
