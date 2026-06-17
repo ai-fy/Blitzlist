@@ -165,17 +165,15 @@ export function renderRoadmap(input: RenderInput): string {
 	<div class="bg-gradient"></div>
 
 	<header class="topbar">
-		<div class="topbar-row">
+		<div class="topbar-brand">
 			<a class="topbar-logo" href="https://blitzlist.ai" rel="noopener" aria-label="Blitzlist">
-				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="26" height="26" />
+				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="24" height="24" />
 			</a>
-			<h1 class="topbar-title">${escape(list.name)}</h1>
-			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
+			<span class="topbar-ws">${escape(workspace.name)}</span>
 			<details class="ovf">
 				<summary aria-label="More">${OVERFLOW_ICON}</summary>
 				<div class="ovf-panel" role="menu">
-					<div class="ovf-ws"><span class="ovf-brand">⚡ Blitzlist</span><span class="ovf-wsname">${escape(workspace.name)}</span></div>
-					${interactive ? `<div class="ovf-section"><div class="ovf-label">you can</div>${renderHeaderCaps(permissions, input.display_name, share_code)}</div>` : ''}
+					${interactive ? `<div class="ovf-section ovf-first"><div class="ovf-label">you can</div>${renderHeaderCaps(permissions, input.display_name, share_code)}</div>` : ''}
 					${setDefaultBtn ? `<div class="ovf-section">${setDefaultBtn}</div>` : ''}
 					<div class="ovf-section">
 						<div class="ovf-label">export</div>
@@ -187,6 +185,10 @@ export function renderRoadmap(input: RenderInput): string {
 					</div>
 				</div>
 			</details>
+		</div>
+		<div class="topbar-row">
+			<h1 class="topbar-title">${escape(list.name)}</h1>
+			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
 		</div>
 		<div class="topbar-views">
 			<div class="view-switcher" role="tablist" aria-label="View">
@@ -1587,15 +1589,26 @@ main {
 	backdrop-filter: saturate(1.2) blur(8px);
 	border-bottom: 1px solid var(--border);
 }
+/* Slim brand strip: logo + workspace left, overflow ⋯ right. */
+.topbar-brand {
+	display: flex; align-items: center; gap: 9px;
+	max-width: 1080px; margin: 0 auto;
+	padding: 9px clamp(var(--space-4), 5vw, var(--space-7)) 0;
+}
+.topbar-logo { display: inline-flex; flex-shrink: 0; }
+.topbar-logo img { width: 24px; height: 24px; display: block; border-radius: 6px; }
+.topbar-ws {
+	font-size: 12.5px; color: var(--fg-3);
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;
+}
+/* Title row — title sits at the content edge, flush with the list below. */
 .topbar-row {
 	display: flex; align-items: center; gap: var(--space-2);
 	max-width: 1080px; margin: 0 auto;
-	padding: 10px clamp(var(--space-4), 5vw, var(--space-7));
+	padding: 2px clamp(var(--space-4), 5vw, var(--space-7)) 4px;
 }
-.topbar-logo { display: inline-flex; flex-shrink: 0; }
-.topbar-logo img { width: 26px; height: 26px; display: block; border-radius: 6px; }
 .topbar-title {
-	font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg);
+	font-size: 20px; font-weight: 600; letter-spacing: -0.015em; color: var(--fg);
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	min-width: 0; flex: 1;
 }
@@ -1651,6 +1664,7 @@ main {
 .ovf-brand { font-size: 13px; font-weight: 600; color: var(--fg); }
 .ovf-wsname { font-size: 12px; color: var(--fg-3); }
 .ovf-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: var(--space-3); }
+.ovf-section.ovf-first { border-top: none; padding-top: 0; }
 .ovf-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-4); }
 .ovf-exports { display: flex; gap: 8px; }
 .ovf-exports a {
