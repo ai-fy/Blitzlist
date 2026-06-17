@@ -166,6 +166,9 @@ export function renderRoadmap(input: RenderInput): string {
 
 	<header class="topbar">
 		<div class="topbar-row">
+			<a class="topbar-logo" href="https://blitzlist.ai" rel="noopener" aria-label="Blitzlist">
+				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="26" height="26" />
+			</a>
 			<h1 class="topbar-title">${escape(list.name)}</h1>
 			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
 			<details class="ovf">
@@ -614,9 +617,10 @@ function renderKanbanCard(item: ItemRow, tone: StateTone, args: ViewArgs): strin
 	const commentCount = (args.commentsByItem[item.id] ?? []).length;
 	const draggable = args.can.edit ? 'true' : 'false';
 	const attachmentsHtml = renderAttachments(args.schemaFields, fields, args.filesById, args.shareCode, 'kanban');
+	const showHead = commentCount > 0 || args.can.edit;
 	return `
 		<article class="kanban-card tone-${tone}" draggable="${draggable}" data-item-id="${escape(item.id)}">
-			${commentCount > 0 ? `<div class="kanban-card-head"><span class="kanban-card-comments">${SPEECH_ICON}${commentCount}</span></div>` : ''}
+			${showHead ? `<div class="kanban-card-head">${commentCount > 0 ? `<span class="kanban-card-comments">${SPEECH_ICON}${commentCount}</span>` : '<span></span>'}${args.can.edit ? `<span class="kanban-grip" aria-label="Drag to move" title="Drag to move">${GRIP_ICON}</span>` : ''}</div>` : ''}
 			<div class="kanban-card-title">${escape(item.title)}</div>
 			${item.body ? `<div class="kanban-card-desc prose">${renderMarkdown(item.body)}</div>` : ''}
 			${attachmentsHtml}
@@ -800,6 +804,7 @@ const VIEW_ICONS: Record<ImplementedView, string> = {
 
 const SPEECH_ICON = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 3.5h10v5H7l-3 2.5v-2.5H2v-5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
 const OVERFLOW_ICON = `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/></svg>`;
+const GRIP_ICON = `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="6" cy="4" r="1.3"/><circle cx="10" cy="4" r="1.3"/><circle cx="6" cy="8" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="6" cy="12" r="1.3"/><circle cx="10" cy="12" r="1.3"/></svg>`;
 
 function capIcon(p: StakeholderPermission): string {
 	switch (p) {
@@ -1331,9 +1336,15 @@ function pageScript(shareCode: string): string {
 		document.addEventListener('pointerdown', function (e) {
 			if (e.pointerType !== 'touch') return; // mouse keeps native DnD
 			if (!e.target.closest) return;
-			if (e.target.closest('a, button, input, select, textarea, form')) return;
 			var card = e.target.closest('.kanban-card[draggable="true"]');
 			if (!card) return;
+			// Grip = unambiguous drag intent → start IMMEDIATELY, no long-press.
+			// The grip's CSS touch-action:none stops the page from scrolling.
+			if (e.target.closest('.kanban-grip')) {
+				begin(card, e.clientX, e.clientY);
+				return;
+			}
+			if (e.target.closest('a, button, input, select, textarea, form')) return;
 			pending = { card: card, sx: e.clientX, sy: e.clientY, fired: false };
 			pending.timer = setTimeout(function () {
 				if (!pending) return;
@@ -1579,6 +1590,8 @@ main {
 	max-width: 1080px; margin: 0 auto;
 	padding: 10px clamp(var(--space-4), 5vw, var(--space-7));
 }
+.topbar-logo { display: inline-flex; flex-shrink: 0; }
+.topbar-logo img { width: 26px; height: 26px; display: block; border-radius: 6px; }
 .topbar-title {
 	font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg);
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1589,27 +1602,24 @@ main {
 	color: var(--fg-3); background: var(--bg-2);
 	border-radius: 999px; padding: 2px 8px;
 }
-/* View switcher — its own row, segmented (icon + label). */
+/* View switcher — its own row, segmented (icon + label). Roomy: full content
+   width, evenly split, comfortable tap height, labels always visible. */
 .topbar-views {
-	display: flex; gap: 2px;
+	display: flex; gap: 4px;
 	max-width: 1080px; margin: 0 auto;
-	padding: 0 clamp(var(--space-4), 5vw, var(--space-7)) 10px;
+	padding: 2px var(--space-3) 12px;
 }
 .topbar-views .tbv {
-	display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-	flex: 1; height: 32px; border-radius: 8px;
-	font-size: 12.5px; font-weight: 500;
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+	flex: 1 1 0; height: 42px; border-radius: 9px;
+	font-size: 14px; font-weight: 500;
 	color: var(--fg-3); background: var(--bg-1);
 	border: 1px solid var(--border);
 	transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
-.topbar-views .tbv svg { width: 14px; height: 14px; }
+.topbar-views .tbv svg { width: 15px; height: 15px; }
 .topbar-views .tbv:hover { color: var(--fg-1); border-color: var(--border-bright); }
 .topbar-views .tbv.is-active { color: var(--accent); background: var(--bg-2); border-color: var(--accent); }
-@media (max-width: 420px) {
-	.topbar-views .tbv span { display: none; }
-	.topbar-views .tbv { flex: 1; }
-}
 .topbar-progress { height: 2px; background: transparent; }
 .topbar-progress > span { display: block; height: 100%; background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); transition: width 0.3s ease; }
 
@@ -1888,7 +1898,17 @@ main {
 .kanban-card.tone-at-risk { border-left-color: var(--at-risk); }
 .kanban-card.tone-off-track { border-left-color: var(--off-track); }
 .kanban-card.tone-pending, .kanban-card.tone-neutral { border-left-color: var(--fg-4); }
-.kanban-card-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
+.kanban-card-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; min-height: 18px; }
+/* Drag handle — touch it and dragging starts immediately (no long-press,
+   no scroll). touch-action:none keeps the page from scrolling under it. */
+.kanban-grip {
+	display: inline-flex; align-items: center; justify-content: center;
+	margin: -4px -4px -4px auto; padding: 4px;
+	color: var(--fg-4); cursor: grab;
+	touch-action: none; -webkit-user-select: none; user-select: none;
+}
+.kanban-grip:hover { color: var(--fg-2); }
+.kanban-grip svg { width: 16px; height: 16px; }
 .kanban-card-id { color: var(--fg-4); font-family: var(--font-mono); }
 .kanban-card-comments { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); }
 .kanban-card-comments svg { width: 11px; height: 11px; }
