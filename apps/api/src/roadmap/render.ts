@@ -174,7 +174,8 @@ export function renderRoadmap(input: RenderInput): string {
 			<details class="ovf">
 				<summary aria-label="More">${OVERFLOW_ICON}</summary>
 				<div class="ovf-panel" role="menu">
-					${interactive ? `<div class="ovf-section ovf-first"><div class="ovf-label">you can</div>${renderHeaderCaps(permissions, input.display_name, share_code)}</div>` : ''}
+					<div class="ovf-ws ovf-first"><span class="ovf-brand">⚡ Blitzlist</span><span class="ovf-wsname">${escape(workspace.name)}</span></div>
+					${interactive ? `<div class="ovf-section"><div class="ovf-label">you can</div>${renderHeaderCaps(permissions, input.display_name, share_code)}</div>` : ''}
 					${setDefaultBtn ? `<div class="ovf-section">${setDefaultBtn}</div>` : ''}
 					<div class="ovf-section">
 						<div class="ovf-label">export</div>
@@ -860,7 +861,7 @@ function renderCommentForm(
 ): string {
 	return `
 		<details class="comment-form">
-			<summary>Add a comment</summary>
+			<summary aria-label="Add a comment" title="Add a comment">${SPEECH_ICON}</summary>
 			<form method="POST" action="/r/${escape(shareCode)}/comment/${escape(itemId)}">
 				<textarea name="body" rows="3" placeholder="What do you think?" maxlength="10000" required></textarea>
 				<div class="comment-form-row">
@@ -2710,27 +2711,27 @@ footer .links { display: flex; gap: var(--space-4); }
 
 /* === Comment form === */
 .comment-form {
-	margin-top: var(--space-3);
+	margin-top: var(--space-2);
 	font-size: 13px;
+	/* Collapsed: just a quiet speech-bubble icon tucked into the bottom-right. */
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
 }
 .comment-form summary {
 	cursor: pointer;
-	color: var(--fg-3);
-	padding: var(--space-2) 0;
+	color: var(--fg-4);
 	list-style: none;
-	font-weight: 500;
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 26px; height: 26px; border-radius: 7px;
+	transition: color 0.15s, background 0.15s;
 }
 .comment-form summary::-webkit-details-marker { display: none; }
-.comment-form summary::before {
-	content: '+';
-	margin-right: var(--space-2);
-	color: var(--fg-3);
-	display: inline-block;
-	transition: transform 0.15s;
-}
-.comment-form[open] summary::before { transform: rotate(45deg); }
-.comment-form summary:hover { color: var(--fg); }
-.comment-form form { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); }
+.comment-form summary svg { width: 15px; height: 15px; }
+.comment-form summary:hover { color: var(--fg-2); background: var(--bg-2); }
+.comment-form[open] summary { color: var(--accent); }
+.comment-form[open] { align-items: stretch; }
+.comment-form form { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
 .comment-form textarea,
 .comment-form input[type=text] {
 	font: inherit;
