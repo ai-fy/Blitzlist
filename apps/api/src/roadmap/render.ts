@@ -188,12 +188,14 @@ export function renderRoadmap(input: RenderInput): string {
 				</div>
 			</details>
 		</div>
-		<nav class="topbar-views" role="tablist" aria-label="View">
-			${IMPLEMENTED_VIEWS.map(
-				(v) =>
-					`<a class="tbv ${v === view ? 'is-active' : ''}" href="?view=${v}" aria-label="${escape(VIEW_LABELS[v])}" aria-current="${v === view ? 'page' : 'false'}">${VIEW_ICONS[v]}<span>${escape(VIEW_LABELS[v])}</span></a>`,
-			).join('')}
-		</nav>
+		<div class="topbar-views">
+			<div class="view-switcher" role="tablist" aria-label="View">
+				${IMPLEMENTED_VIEWS.map(
+					(v) =>
+						`<a class="view-btn view-${v} ${v === view ? 'is-active' : ''}${listDefault === v ? ' is-default' : ''}" href="?view=${v}" aria-label="${escape(VIEW_LABELS[v])}" aria-current="${v === view ? 'page' : 'false'}">${VIEW_ICONS[v]}<span>${escape(VIEW_LABELS[v])}</span></a>`,
+				).join('')}
+			</div>
+		</div>
 		<div class="topbar-progress" role="img" aria-label="${donePct}% complete"><span style="width:${donePct}%"></span></div>
 	</header>
 
@@ -1602,24 +1604,26 @@ main {
 	color: var(--fg-3); background: var(--bg-2);
 	border-radius: 999px; padding: 2px 8px;
 }
-/* View switcher — its own row, segmented (icon + label). Roomy: full content
-   width, evenly split, comfortable tap height, labels always visible. */
+/* View switcher — the classic pill, on its own row, stretched full-width so
+   the four segments are roomy. Per-view-type colours (below). */
 .topbar-views {
-	display: flex; gap: 4px;
 	max-width: 1080px; margin: 0 auto;
 	padding: 2px var(--space-3) 12px;
 }
-.topbar-views .tbv {
-	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-	flex: 1 1 0; height: 42px; border-radius: 9px;
-	font-size: 14px; font-weight: 500;
-	color: var(--fg-3); background: var(--bg-1);
-	border: 1px solid var(--border);
-	transition: color 0.12s, background 0.12s, border-color 0.12s;
+.topbar-views .view-switcher { display: flex; width: 100%; }
+.topbar-views .view-btn { flex: 1; justify-content: center; padding: 8px 11px; }
+/* Each list type gets its own colour (--vc); icon always tinted, active = a
+   soft fill of that colour. */
+.view-btn.view-list { --vc: var(--info); }
+.view-btn.view-kanban { --vc: var(--accent); }
+.view-btn.view-table { --vc: var(--shipped); }
+.view-btn.view-todo { --vc: var(--at-risk); }
+.view-btn svg { color: var(--vc); opacity: 0.9; }
+.view-btn.is-active {
+	color: var(--vc);
+	background: color-mix(in srgb, var(--vc) 16%, transparent);
 }
-.topbar-views .tbv svg { width: 15px; height: 15px; }
-.topbar-views .tbv:hover { color: var(--fg-1); border-color: var(--border-bright); }
-.topbar-views .tbv.is-active { color: var(--accent); background: var(--bg-2); border-color: var(--accent); }
+.view-btn.is-active svg { opacity: 1; }
 .topbar-progress { height: 2px; background: transparent; }
 .topbar-progress > span { display: block; height: 100%; background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); transition: width 0.3s ease; }
 
