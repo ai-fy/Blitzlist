@@ -169,7 +169,10 @@ export function renderRoadmap(input: RenderInput): string {
 			<a class="topbar-logo" href="https://blitzlist.ai" rel="noopener" aria-label="Blitzlist">
 				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="24" height="24" />
 			</a>
-			<span class="topbar-ws">${escape(workspace.name)}</span>
+		</div>
+		<div class="topbar-row">
+			<h1 class="topbar-title">${escape(list.name)}</h1>
+			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
 			<details class="ovf">
 				<summary aria-label="More">${OVERFLOW_ICON}</summary>
 				<div class="ovf-panel" role="menu">
@@ -185,10 +188,6 @@ export function renderRoadmap(input: RenderInput): string {
 					</div>
 				</div>
 			</details>
-		</div>
-		<div class="topbar-row">
-			<h1 class="topbar-title">${escape(list.name)}</h1>
-			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
 		</div>
 		<div class="topbar-views">
 			<div class="view-switcher" role="tablist" aria-label="View">
@@ -1626,8 +1625,9 @@ main {
 .topbar-views {
 	max-width: 1080px; margin: 0 auto;
 	/* Same horizontal inset as the title row + the list below, so the logo,
-	   title and the switcher pill all share one left edge. */
-	padding: 2px clamp(var(--space-4), 5vw, var(--space-7)) 12px;
+	   title and the switcher pill all share one left edge. Extra top padding
+	   gives the title some breathing room above the switcher. */
+	padding: 10px clamp(var(--space-4), 5vw, var(--space-7)) 12px;
 }
 .topbar-views .view-switcher { display: flex; width: 100%; }
 .topbar-views .view-btn { flex: 1; justify-content: center; padding: 8px 11px; }
