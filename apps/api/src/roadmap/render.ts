@@ -1608,7 +1608,9 @@ main {
    the four segments are roomy. Per-view-type colours (below). */
 .topbar-views {
 	max-width: 1080px; margin: 0 auto;
-	padding: 2px var(--space-3) 12px;
+	/* Same horizontal inset as the title row + the list below, so the logo,
+	   title and the switcher pill all share one left edge. */
+	padding: 2px clamp(var(--space-4), 5vw, var(--space-7)) 12px;
 }
 .topbar-views .view-switcher { display: flex; width: 100%; }
 .topbar-views .view-btn { flex: 1; justify-content: center; padding: 8px 11px; }
