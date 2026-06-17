@@ -168,12 +168,6 @@ export function renderRoadmap(input: RenderInput): string {
 		<div class="topbar-row">
 			<h1 class="topbar-title">${escape(list.name)}</h1>
 			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
-			<nav class="topbar-views" role="tablist" aria-label="View">
-				${IMPLEMENTED_VIEWS.map(
-					(v) =>
-						`<a class="tbv ${v === view ? 'is-active' : ''}" href="?view=${v}" title="${escape(VIEW_LABELS[v])}" aria-label="${escape(VIEW_LABELS[v])}" aria-current="${v === view ? 'page' : 'false'}">${VIEW_ICONS[v]}</a>`,
-				).join('')}
-			</nav>
 			<details class="ovf">
 				<summary aria-label="More">${OVERFLOW_ICON}</summary>
 				<div class="ovf-panel" role="menu">
@@ -191,6 +185,12 @@ export function renderRoadmap(input: RenderInput): string {
 				</div>
 			</details>
 		</div>
+		<nav class="topbar-views" role="tablist" aria-label="View">
+			${IMPLEMENTED_VIEWS.map(
+				(v) =>
+					`<a class="tbv ${v === view ? 'is-active' : ''}" href="?view=${v}" aria-label="${escape(VIEW_LABELS[v])}" aria-current="${v === view ? 'page' : 'false'}">${VIEW_ICONS[v]}<span>${escape(VIEW_LABELS[v])}</span></a>`,
+			).join('')}
+		</nav>
 		<div class="topbar-progress" role="img" aria-label="${donePct}% complete"><span style="width:${donePct}%"></span></div>
 	</header>
 
@@ -734,6 +734,7 @@ function renderTodoView(args: ViewArgs): string {
 	// pill for genuinely informative intermediate states (e.g. "doing",
 	// "blocked"). Done-ness is shown by the checkbox + strikethrough.
 	const defaultOpenState = stateField?.options?.find((o) => !(stateField.terminal ?? []).includes(o)) ?? null;
+	const doneState = (stateField?.terminal ?? [])[0] ?? null;
 	const rows = ordered.map((item) => {
 		const fields = item.fields_json as Record<string, unknown>;
 		const state = typeof fields.state === 'string' ? fields.state : null;
@@ -743,7 +744,7 @@ function renderTodoView(args: ViewArgs): string {
 		const checkbox = canToggle
 			? `<form class="todo-toggle" method="POST" action="/r/${escape(args.shareCode)}/state/${escape(item.id)}">
 					<input type="hidden" name="state" value="${escape(target!.to)}" />
-					<button type="submit" class="todo-checkbox ${isDone ? 'checked' : ''}" aria-label="${isDone ? 'Mark not done' : 'Mark done'}">${isDone ? CHECK_ICON : ''}</button>
+					<button type="submit" class="todo-checkbox ${isDone ? 'checked' : ''}" data-done-state="${escape(doneState ?? '')}" data-open-state="${escape(defaultOpenState ?? '')}" aria-label="${isDone ? 'Mark not done' : 'Mark done'}">${isDone ? CHECK_ICON : ''}</button>
 				</form>`
 			: `<span class="todo-checkbox static ${isDone ? 'checked' : ''}">${isDone ? CHECK_ICON : ''}</span>`;
 		const tone: StateTone = isDone ? 'shipped' : state ? stateTone(state) : 'neutral';
@@ -1107,46 +1108,53 @@ function pageScript(shareCode: string): string {
 	});
 
 	// === Todo: fetch-based checkbox toggle (no navigation) =================
+	var CHECK_SVG = ${JSON.stringify(CHECK_ICON)};
+	function paintTodoDone(item, button, done) {
+		if (done) {
+			button.classList.add('checked');
+			button.innerHTML = CHECK_SVG;
+			item.classList.add('is-done');
+		} else {
+			button.classList.remove('checked');
+			button.innerHTML = '';
+			item.classList.remove('is-done', 'just-completed');
+		}
+	}
 	document.querySelectorAll('form.todo-toggle').forEach(function (form) {
 		form.addEventListener('submit', function (e) {
 			e.preventDefault();
 			var input = form.querySelector('input[name="state"]');
-			if (!input) return;
-			var newState = input.value;
 			var item = form.closest('.todo-item');
 			var button = form.querySelector('.todo-checkbox');
 			if (!button) return;
 			var itemId = form.action.split('/').pop();
-			button.disabled = true;
+			var goingToDone = !button.classList.contains('checked');
+			var target = goingToDone ? button.dataset.doneState : button.dataset.openState;
+			if (!target) return;
+
+			// === Optimistic: flip the UI NOW, POST in the background ===
+			paintTodoDone(item, button, goingToDone);
+			if (goingToDone) {
+				item.classList.remove('just-completed');
+				void item.offsetWidth; // restart the completion animation
+				item.classList.add('just-completed');
+				setTimeout(function () { item.classList.remove('just-completed'); }, 950);
+				var cb = button.getBoundingClientRect();
+				confettiBurst(cb.left + cb.width / 2, cb.top + cb.height / 2);
+			}
+			if (input) input.value = goingToDone ? button.dataset.openState : button.dataset.doneState;
 			button.classList.add('is-pending');
-			postStateChange(decodeURIComponent(itemId), newState)
-				.then(function (data) {
-					button.disabled = false;
+
+			postStateChange(decodeURIComponent(itemId), target)
+				.then(function () {
 					button.classList.remove('is-pending');
-					if (data.is_terminal) {
-						button.classList.add('checked');
-						button.innerHTML = ${JSON.stringify(CHECK_ICON)};
-						item.classList.add('is-done');
-						// Replay the completion animation from the top each time.
-						item.classList.remove('just-completed');
-						void item.offsetWidth; // force reflow so the animation restarts
-						item.classList.add('just-completed');
-						setTimeout(function () { item.classList.remove('just-completed'); }, 950);
-						// 🎉 confetti from the checkbox centre.
-						var cb = button.getBoundingClientRect();
-						confettiBurst(cb.left + cb.width / 2, cb.top + cb.height / 2);
-					} else {
-						item.classList.remove('is-done');
-						item.classList.remove('just-completed');
-						button.classList.remove('checked');
-						button.innerHTML = '';
-					}
-					if (data.next_toggle_state) input.value = data.next_toggle_state;
 				})
 				.catch(function (err) {
-					console.error('todo toggle failed', err);
-					button.disabled = false;
+					// Revert the optimistic flip.
 					button.classList.remove('is-pending');
+					paintTodoDone(item, button, !goingToDone);
+					if (input) input.value = target;
+					console.error('todo toggle failed', err);
 					alert('Could not toggle: ' + err.message);
 				});
 		});
@@ -1282,7 +1290,7 @@ function pageScript(shareCode: string): string {
 	// scroll still scrolls), a floating ghost follows the finger, and lifting
 	// over a column drops it there. Reuses moveCardToColumn.
 	(function () {
-		var LONG_PRESS = 260, CANCEL_MOVE = 12;
+		var LONG_PRESS = 150, CANCEL_MOVE = 12;
 		var pending = null; // { card, sx, sy, fired, timer }
 		var drag = null;     // { card, ghost, dx, dy }
 
@@ -1581,15 +1589,27 @@ main {
 	color: var(--fg-3); background: var(--bg-2);
 	border-radius: 999px; padding: 2px 8px;
 }
-.topbar-views { display: inline-flex; gap: 2px; flex-shrink: 0; }
-.topbar-views .tbv {
-	display: inline-flex; align-items: center; justify-content: center;
-	width: 30px; height: 30px; border-radius: 7px;
-	color: var(--fg-4); transition: color 0.12s, background 0.12s;
+/* View switcher — its own row, segmented (icon + label). */
+.topbar-views {
+	display: flex; gap: 2px;
+	max-width: 1080px; margin: 0 auto;
+	padding: 0 clamp(var(--space-4), 5vw, var(--space-7)) 10px;
 }
-.topbar-views .tbv svg { width: 15px; height: 15px; }
-.topbar-views .tbv:hover { color: var(--fg-2); background: var(--bg-2); }
-.topbar-views .tbv.is-active { color: var(--accent); background: var(--bg-2); }
+.topbar-views .tbv {
+	display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+	flex: 1; height: 32px; border-radius: 8px;
+	font-size: 12.5px; font-weight: 500;
+	color: var(--fg-3); background: var(--bg-1);
+	border: 1px solid var(--border);
+	transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.topbar-views .tbv svg { width: 14px; height: 14px; }
+.topbar-views .tbv:hover { color: var(--fg-1); border-color: var(--border-bright); }
+.topbar-views .tbv.is-active { color: var(--accent); background: var(--bg-2); border-color: var(--accent); }
+@media (max-width: 420px) {
+	.topbar-views .tbv span { display: none; }
+	.topbar-views .tbv { flex: 1; }
+}
 .topbar-progress { height: 2px; background: transparent; }
 .topbar-progress > span { display: block; height: 100%; background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); transition: width 0.3s ease; }
 
