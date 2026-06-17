@@ -1655,7 +1655,12 @@ main {
 	background: color-mix(in srgb, var(--vc) 16%, transparent);
 }
 .view-btn.is-active svg { opacity: 1; }
-.topbar-progress { height: 2px; background: transparent; }
+.topbar-progress {
+	height: 2px; background: transparent;
+	/* Constrained to the list/content width, not full-bleed. */
+	max-width: 1080px; margin: 0 auto;
+	padding: 0 clamp(var(--space-4), 5vw, var(--space-7));
+}
 .topbar-progress > span { display: block; height: 100%; background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); transition: width 0.3s ease; }
 
 /* Overflow menu */
