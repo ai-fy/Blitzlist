@@ -744,6 +744,11 @@ function renderTodoView(args: ViewArgs): string {
 			return firstDone ? { to: firstDone, done: true } : null;
 		}
 	};
+	// The default "open" state (first non-terminal option) is redundant in the
+	// todo view — the checkbox already says "not done". Only surface a state
+	// pill for genuinely informative intermediate states (e.g. "doing",
+	// "blocked"). Done-ness is shown by the checkbox + strikethrough.
+	const defaultOpenState = stateField?.options?.find((o) => !(stateField.terminal ?? []).includes(o)) ?? null;
 	const rows = ordered.map((item) => {
 		const fields = item.fields_json as Record<string, unknown>;
 		const state = typeof fields.state === 'string' ? fields.state : null;
@@ -766,7 +771,7 @@ function renderTodoView(args: ViewArgs): string {
 						<code class="todo-id">${escape(item.id)}</code>
 					</div>
 					${item.body ? `<div class="todo-desc prose">${renderMarkdown(item.body)}</div>` : ''}
-					${state ? `<div class="todo-state">${statusPill(state, tone)}</div>` : ''}
+					${state && !isDone && state !== defaultOpenState ? `<div class="todo-state">${statusPill(state, tone)}</div>` : ''}
 				</div>
 			</li>
 		`;
@@ -1493,12 +1498,14 @@ main {
 }
 
 /* === Hero === */
-.hero { margin-bottom: var(--space-8); }
-.hero-row { display: flex; gap: var(--space-5); align-items: flex-start; margin-bottom: var(--space-5); }
-.hero-glyph { flex-shrink: 0; padding-top: 6px; }
+/* Kept deliberately compact so the list is visible almost immediately —
+   small glyph, modest title, tight vertical rhythm. */
+.hero { margin-bottom: var(--space-4); }
+.hero-row { display: flex; gap: var(--space-3); align-items: center; margin-bottom: var(--space-3); }
+.hero-glyph { flex-shrink: 0; padding-top: 0; }
 .hero-diamond {
-	width: 48px; height: 48px;
-	filter: drop-shadow(0 0 16px currentColor);
+	width: 28px; height: 28px;
+	filter: drop-shadow(0 0 10px currentColor);
 }
 .hero-diamond.tone-shipped { color: var(--shipped); }
 .hero-diamond.tone-on-track { color: var(--on-track); }
@@ -1507,22 +1514,23 @@ main {
 .hero-diamond.tone-neutral { color: var(--fg-3); filter: none; }
 
 .hero-eyebrow {
-	font-size: 12px; font-weight: 500;
+	font-size: 11px; font-weight: 500;
 	color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em;
-	margin-bottom: var(--space-2);
+	margin-bottom: 2px;
 }
 .hero-title {
-	font-size: clamp(28px, 4.5vw, 44px);
-	font-weight: 600; line-height: 1.1;
+	font-size: clamp(22px, 3vw, 30px);
+	font-weight: 600; line-height: 1.15;
 	letter-spacing: -0.02em;
-	margin-bottom: var(--space-3);
+	margin-bottom: 0;
 	color: var(--fg);
 }
 .hero-desc {
-	font-size: 15px; color: var(--fg-2); max-width: 56ch; line-height: 1.6;
+	font-size: 14px; color: var(--fg-2); max-width: 64ch; line-height: 1.55;
+	margin-top: var(--space-2);
 }
 
-.hero-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-6); }
+.hero-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 0; }
 
 .meta-pill {
 	display: inline-flex; align-items: center; gap: var(--space-2);
@@ -1784,7 +1792,14 @@ main {
 }
 .items-table tbody tr:last-child td { border-bottom: none; }
 .items-table tbody tr:hover { background: var(--bg-2); }
-.items-table .td-id code { color: var(--fg-4); }
+/* ID column: shrink to its content + tighter padding so the title gets the room. */
+.items-table .th-id, .items-table .td-id {
+	width: 1%;
+	white-space: nowrap;
+	padding-left: var(--space-3);
+	padding-right: var(--space-2);
+}
+.items-table .td-id code { color: var(--fg-4); font-size: 12px; }
 .items-table .td-title { color: var(--fg); font-weight: 500; }
 .items-table .td-empty { color: var(--fg-4); }
 .items-table .td-check { color: var(--shipped); }
@@ -1996,7 +2011,7 @@ main {
 .card-diamond.tone-off-track { color: var(--off-track); }
 .card-diamond.tone-pending, .card-diamond.tone-neutral { color: var(--fg-3); }
 .card-title { font-size: 15px; font-weight: 500; color: var(--fg); flex: 1; min-width: 0; }
-.card-id { color: var(--fg-4); font-size: 12px; flex-shrink: 0; }
+.card-id { color: var(--fg-4); font-size: 11px; font-family: var(--font-mono); flex-shrink: 0; opacity: 0.8; }
 
 .card-desc {
 	color: var(--fg-2); font-size: 13.5px; line-height: 1.6;
@@ -2153,7 +2168,7 @@ footer .links { display: flex; gap: var(--space-4); }
 	gap: var(--space-3);
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: var(--space-6);
+	margin-bottom: var(--space-3);
 }
 .hero-meta-row .hero-meta { margin-bottom: 0; flex: 1; min-width: 0; }
 .hero-controls { display: inline-flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
