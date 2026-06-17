@@ -165,12 +165,10 @@ export function renderRoadmap(input: RenderInput): string {
 	<div class="bg-gradient"></div>
 
 	<header class="topbar">
-		<div class="topbar-brand">
+		<div class="topbar-row">
 			<a class="topbar-logo" href="https://blitzlist.ai" rel="noopener" aria-label="Blitzlist">
 				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="24" height="24" />
 			</a>
-		</div>
-		<div class="topbar-row">
 			<h1 class="topbar-title">${escape(list.name)}</h1>
 			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
 			<details class="ovf">
@@ -1604,11 +1602,11 @@ main {
 	font-size: 12.5px; color: var(--fg-3);
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;
 }
-/* Title row — title sits at the content edge, flush with the list below. */
+/* Title row — logo + title + count + overflow on one line. */
 .topbar-row {
 	display: flex; align-items: center; gap: var(--space-2);
 	max-width: 1080px; margin: 0 auto;
-	padding: 2px clamp(var(--space-4), 5vw, var(--space-7)) 4px;
+	padding: 11px clamp(var(--space-4), 5vw, var(--space-7)) 4px;
 }
 .topbar-title {
 	font-size: 20px; font-weight: 600; letter-spacing: -0.015em; color: var(--fg);
