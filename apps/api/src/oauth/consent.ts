@@ -1,20 +1,49 @@
 /**
  * OAuth consent screen — the /oauth/authorize endpoint.
  *
- * v0.1 single-user spike: there are no real user accounts yet (BL-009
- * magic-link signup lands in v0.5). The consent screen shows the client's
- * name + requested scopes and a single "Authorize" button. Approving issues
- * an OAuth grant bound to the hardcoded BLITZLIST_SPIKE_USER_ID and
- * BLITZLIST_SPIKE_WORKSPACE_ID.
+ * Multi-tenant phase 1 (BL-024): the consent screen now lists the workspaces
+ * the signed-in user belongs to and lets them pick WHICH workspace this MCP
+ * client connection targets. The chosen workspace is baked into the grant
+ * props, so different clients (or re-authorizations) can target different
+ * workspaces.
  *
- * When BL-009 ships, this is where magic-link sign-in injects a real
- * user_id into the consent flow.
+ * Identity is still the bootstrap user (BLITZLIST_SPIKE_USER_ID) until phase 2
+ * wires real login (magic-link). When that lands, only the "who is the user"
+ * resolution here changes — the workspace picker stays.
  */
 
 import type { Context } from 'hono';
 import { html } from 'hono/html';
 import type { AuthRequest } from '@cloudflare/workers-oauth-provider';
+import { eq } from 'drizzle-orm';
+import { schema } from '@blitzlist/db';
 import type { Env, OAuthProps } from '../env.js';
+import { getDb } from '../db.js';
+
+type WorkspaceChoice = { id: string; name: string; slug: string; role: string };
+
+/**
+ * Resolve the current consenting user. Phase 1: the bootstrap user. Phase 2
+ * replaces this with the magic-link-authenticated identity.
+ */
+function currentUserId(c: Context<{ Bindings: Env }>): string {
+	return c.env.BLITZLIST_SPIKE_USER_ID;
+}
+
+async function membershipsFor(c: Context<{ Bindings: Env }>, userId: string): Promise<WorkspaceChoice[]> {
+	const db = getDb(c.env);
+	const rows = await db
+		.select({
+			id: schema.workspaces.id,
+			name: schema.workspaces.name,
+			slug: schema.workspaces.slug,
+			role: schema.workspace_members.role,
+		})
+		.from(schema.workspace_members)
+		.innerJoin(schema.workspaces, eq(schema.workspaces.id, schema.workspace_members.workspace_id))
+		.where(eq(schema.workspace_members.user_id, userId));
+	return rows;
+}
 
 export async function consentGet(c: Context<{ Bindings: Env }>) {
 	const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
@@ -22,16 +51,22 @@ export async function consentGet(c: Context<{ Bindings: Env }>) {
 
 	const clientName = client?.clientName ?? `Unknown client (${oauthReqInfo.clientId})`;
 	const requestedScopes = oauthReqInfo.scope.length > 0 ? oauthReqInfo.scope : ['mcp'];
-
-	// Serialize the auth request into a hidden form field so the POST handler
-	// can re-parse it without needing another round-trip to KV.
 	const encodedRequest = btoa(JSON.stringify(oauthReqInfo));
+
+	const userId = currentUserId(c);
+	const workspaces = await membershipsFor(c, userId);
+	const defaultWorkspaceId =
+		workspaces.find((w) => w.id === c.env.BLITZLIST_SPIKE_WORKSPACE_ID)?.id ??
+		workspaces[0]?.id ??
+		c.env.BLITZLIST_SPIKE_WORKSPACE_ID;
 
 	return c.html(renderConsent({
 		clientName,
 		requestedScopes,
 		encodedRequest,
-		userDisplay: c.env.BLITZLIST_SPIKE_USER_ID,
+		userDisplay: userId,
+		workspaces,
+		defaultWorkspaceId,
 	}));
 }
 
@@ -39,6 +74,7 @@ export async function consentPost(c: Context<{ Bindings: Env }>) {
 	const form = await c.req.formData();
 	const decision = form.get('decision');
 	const encoded = form.get('request');
+	const chosenWorkspace = form.get('workspace_id');
 
 	if (typeof encoded !== 'string') {
 		return c.html(renderError('Malformed consent submission — missing request blob.'), 400);
@@ -52,7 +88,6 @@ export async function consentPost(c: Context<{ Bindings: Env }>) {
 	}
 
 	if (decision !== 'approve') {
-		// Standard error: the OAuth client gets access_denied
 		const denyUrl = new URL(oauthReqInfo.redirectUri);
 		denyUrl.searchParams.set('error', 'access_denied');
 		denyUrl.searchParams.set('error_description', 'User declined authorization.');
@@ -60,16 +95,22 @@ export async function consentPost(c: Context<{ Bindings: Env }>) {
 		return c.redirect(denyUrl.toString(), 302);
 	}
 
-	const props: OAuthProps = {
-		user_id: c.env.BLITZLIST_SPIKE_USER_ID,
-		workspace_id: c.env.BLITZLIST_SPIKE_WORKSPACE_ID,
-	};
+	const userId = currentUserId(c);
+
+	// Validate the chosen workspace against the user's memberships — never trust
+	// the posted value. Fall back to the bootstrap workspace if absent/invalid.
+	const workspaces = await membershipsFor(c, userId);
+	const valid = workspaces.find((w) => w.id === chosenWorkspace);
+	const workspace_id = valid?.id ?? c.env.BLITZLIST_SPIKE_WORKSPACE_ID;
+
+	const props: OAuthProps = { user_id: userId, workspace_id };
 
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
 		request: oauthReqInfo,
-		userId: c.env.BLITZLIST_SPIKE_USER_ID,
+		userId,
 		metadata: {
-			label: 'Blitzlist spike user',
+			label: 'Blitzlist user',
+			workspace_id,
 		},
 		scope: oauthReqInfo.scope.length > 0 ? oauthReqInfo.scope : ['mcp'],
 		props,
@@ -85,6 +126,8 @@ function renderConsent(params: {
 	requestedScopes: string[];
 	encodedRequest: string;
 	userDisplay: string;
+	workspaces: WorkspaceChoice[];
+	defaultWorkspaceId: string;
 }) {
 	return html`<!doctype html>
 <html lang="en">
@@ -164,6 +207,38 @@ function renderConsent(params: {
 			font-size: 0.8125rem;
 			border: 1px solid #e8e6e1;
 		}
+		.ws-picker {
+			margin: 0 0 1.5rem;
+		}
+		.ws-picker > .label {
+			display: block;
+			font-size: 0.8125rem;
+			font-weight: 600;
+			color: #555;
+			margin-bottom: 0.5rem;
+		}
+		.ws-option {
+			display: flex;
+			align-items: center;
+			gap: 0.625rem;
+			padding: 0.75rem;
+			border: 1px solid #e8e6e1;
+			border-radius: 0.5rem;
+			margin-bottom: 0.5rem;
+			cursor: pointer;
+			transition: border-color 0.12s, background 0.12s;
+		}
+		.ws-option:hover { border-color: #FF6B35; background: #fff7f3; }
+		.ws-option:last-child { margin-bottom: 0; }
+		.ws-option input { accent-color: #FF6B35; }
+		.ws-option .ws-name { font-weight: 500; }
+		.ws-option .ws-role {
+			margin-left: auto;
+			font-size: 0.6875rem;
+			text-transform: uppercase;
+			letter-spacing: 0.04em;
+			color: #999;
+		}
 		.notice {
 			font-size: 0.8125rem;
 			color: #888;
@@ -222,7 +297,7 @@ function renderConsent(params: {
 
 		<dl class="detail">
 			<dt>You'll be signed in as</dt>
-			<dd>${params.userDisplay} (single-user spike)</dd>
+			<dd>${params.userDisplay}</dd>
 			<dt>Application</dt>
 			<dd>${params.clientName}</dd>
 			<dt>Permissions requested</dt>
@@ -233,10 +308,26 @@ function renderConsent(params: {
 			</dd>
 		</dl>
 
+		<div class="ws-picker">
+			<span class="label">Connect this app to which workspace?</span>
+			${params.workspaces.length > 0
+				? params.workspaces.map(
+						(w) => html`<label class="ws-option">
+							<input type="radio" name="workspace_id" value="${w.id}" ${w.id === params.defaultWorkspaceId ? 'checked' : ''} />
+							<span class="ws-name">${w.name}</span>
+							<span class="ws-role">${w.role}</span>
+						</label>`,
+					)
+				: html`<label class="ws-option">
+						<input type="radio" name="workspace_id" value="${params.defaultWorkspaceId}" checked />
+						<span class="ws-name">Default workspace</span>
+					</label>`}
+		</div>
+
 		<p class="notice">
-			This is a v0.1 single-user spike of Blitzlist. Real magic-link sign-in
-			and multi-user workspaces ship in v0.5. Approving here authorizes the
-			application against the hardcoded spike user.
+			This MCP client connection will be bound to the workspace you pick.
+			To use a different workspace, re-authorize and choose another — or mint
+			an agent token while connected to it.
 		</p>
 
 		<input type="hidden" name="request" value="${params.encodedRequest}" />

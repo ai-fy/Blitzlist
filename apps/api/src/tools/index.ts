@@ -3,6 +3,10 @@
  *
  * v0.5 tool surface (BL-035 Airtable shape):
  *
+ *   Workspaces (multi-tenant, BL-024):
+ *     create_workspace                              — provision an isolated workspace (owner)
+ *     list_workspaces                               — workspaces you're a member of
+ *
  *   Templates:
  *     list_templates                                — read templates
  *
@@ -70,6 +74,8 @@ import type { Db } from '../db.js';
 import type { WorkspaceToolCtx } from '../workspace-context.js';
 
 import { listTemplates } from './list-templates.js';
+import { createWorkspace } from './create-workspace.js';
+import { listWorkspaces } from './list-workspaces.js';
 import { createList } from './create-list.js';
 import { updateList } from './update-list.js';
 import { closeList } from './close-list.js';
@@ -106,6 +112,8 @@ import { listFiles } from './list-files.js';
 import { deleteFile } from './delete-file.js';
 
 export const toolRegistry = createToolRegistry<Db, WorkspaceToolCtx>([
+	createWorkspace,
+	listWorkspaces,
 	listTemplates,
 	createList,
 	updateList,

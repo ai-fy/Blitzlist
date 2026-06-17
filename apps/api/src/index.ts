@@ -1484,6 +1484,33 @@ async function apiFetch(
 		);
 	}
 
+	const db = getDb(env);
+
+	// Multi-tenant enforcement (BL-024): the workspace baked into the grant must
+	// be one the user is actually a member of. The consent picker already
+	// constrains this at authorize time; re-checking here is defense in depth
+	// (and covers grants minted before a membership was revoked).
+	const membership = await db
+		.select({ role: schema.workspace_members.role })
+		.from(schema.workspace_members)
+		.where(
+			and(
+				eq(schema.workspace_members.user_id, props.user_id),
+				eq(schema.workspace_members.workspace_id, props.workspace_id),
+			),
+		)
+		.limit(1);
+	if (!membership[0]) {
+		return Response.json(
+			errorResponse(
+				null,
+				RpcError.INVALID_REQUEST,
+				'You are not a member of this workspace. Re-authorize and pick a workspace you belong to.',
+			),
+			{ status: 403 },
+		);
+	}
+
 	const response = await handleMcpMessage(message, {
 		name: 'blitzlist',
 		version: VERSION,
@@ -1491,7 +1518,7 @@ async function apiFetch(
 		toolContext: {
 			user_id: props.user_id,
 			workspace_id: props.workspace_id,
-			db: getDb(env),
+			db,
 			env,
 		},
 	});
