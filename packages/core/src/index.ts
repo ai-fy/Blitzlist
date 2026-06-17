@@ -21,6 +21,7 @@ export * from './executor.js';
 export * from './release.js';
 export * from './fields.js';
 export * from './stakeholder.js';
+export * from './agent-token.js';
 export * from './wordlist.js';
 
 export const VERSION = '0.1.0';

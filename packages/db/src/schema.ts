@@ -401,6 +401,40 @@ export const stakeholder_access_keys = sqliteTable(
 	(t) => [index('idx_stakeholder_keys_workspace').on(t.workspace_id)],
 );
 
+// === Agent tokens (BL-023) ===================================================
+//
+// Static bearer credentials for HEADLESS agents (e.g. Hermes) that need
+// write access without the interactive OAuth flow. Distinct from
+// stakeholder_access_keys: agent tokens act AS the workspace (resolve to the
+// owner's context) with a create/edit/share tool subset — NO admin tools.
+// Served at /a/mcp. Token format blz_at_<32 base32>.
+export const agent_tokens = sqliteTable(
+	'agent_tokens',
+	{
+		id: text('id').primaryKey(), // uuid
+		workspace_id: text('workspace_id')
+			.notNull()
+			.references(() => workspaces.id, { onDelete: 'cascade' }),
+		token_hash: text('token_hash').notNull().unique(), // sha256(raw) hex
+		prefix: text('prefix').notNull(), // display ("blz_at_xxxx")
+		label: text('label').notNull(),
+
+		// The owner who minted this token. Agent actions resolve to this user's
+		// context (workspace + identity), so activity is attributed to them.
+		created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+
+		expires_at: integer('expires_at', { mode: 'timestamp' }),
+		revoked_at: integer('revoked_at', { mode: 'timestamp' }),
+		last_used_at: integer('last_used_at', { mode: 'timestamp' }),
+		use_count: integer('use_count').notNull().default(0),
+
+		created_at: integer('created_at', { mode: 'timestamp' })
+			.notNull()
+			.default(sql`(unixepoch())`),
+	},
+	(t) => [index('idx_agent_tokens_workspace').on(t.workspace_id)],
+);
+
 // === Share codes (BL-030) ====================================================
 
 // "Anyone with the link" — Google-Drive-style. Code is 4 EFF-style diceware
@@ -512,6 +546,8 @@ export type ActivityAction =
 	| 'template.field_updated' // BL-035
 	| 'stakeholder_key.created' // BL-011
 	| 'stakeholder_key.revoked' // BL-011
+	| 'agent_token.created' // BL-023
+	| 'agent_token.revoked' // BL-023
 	| 'share_code.created' // BL-030
 	| 'share_code.revoked' // BL-030
 	| 'file.uploaded' // BL-021
@@ -558,6 +594,7 @@ export const schema = {
 	files,
 	file_versions,
 	stakeholder_access_keys,
+	agent_tokens,
 	share_codes,
 	activity_log,
 };

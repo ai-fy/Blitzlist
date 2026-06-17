@@ -43,6 +43,11 @@
  *     revoke_share_code                             — soft-delete a code
  *     list_share_codes                              — list (includes code itself)
  *
+ *   Agent tokens (admin, BL-023):
+ *     create_agent_token                            — mint a headless-agent bearer (/a/mcp)
+ *     list_agent_tokens                             — list with metadata
+ *     revoke_agent_token                            — soft-delete a token
+ *
  * Total: 22 tools. All include MCP annotations (title + readOnlyHint/
  * destructiveHint/idempotentHint/openWorldHint) per Anthropic's MCP-directory
  * submission requirements.
@@ -92,6 +97,9 @@ import { listStakeholderKeys } from './list-stakeholder-keys.js';
 import { createShareCode } from './create-share-code.js';
 import { revokeShareCode } from './revoke-share-code.js';
 import { listShareCodes } from './list-share-codes.js';
+import { createAgentToken } from './create-agent-token.js';
+import { listAgentTokens } from './list-agent-tokens.js';
+import { revokeAgentToken } from './revoke-agent-token.js';
 import { uploadFile } from './upload-file.js';
 import { getFile } from './get-file.js';
 import { listFiles } from './list-files.js';
@@ -126,6 +134,9 @@ export const toolRegistry = createToolRegistry<Db, WorkspaceToolCtx>([
 	createShareCode,
 	revokeShareCode,
 	listShareCodes,
+	createAgentToken,
+	listAgentTokens,
+	revokeAgentToken,
 	uploadFile,
 	getFile,
 	listFiles,

@@ -39,12 +39,13 @@ import {
 	isJsonRpcRequest,
 	isNotification,
 } from '@blitzlist/mcp';
-import { looksLikeStakeholderKey, looksLikeShareCode, sha256Hex } from '@blitzlist/core';
+import { looksLikeStakeholderKey, looksLikeShareCode, looksLikeAgentToken, sha256Hex } from '@blitzlist/core';
 import type { Env, OAuthProps } from './env.js';
 import { consentGet, consentPost } from './oauth/consent.js';
 import { getDb, nextItemId, uuid } from './db.js';
 import { toolRegistry } from './tools/index.js';
 import { stakeholderToolRegistry } from './tools/stakeholder/index.js';
+import { agentToolRegistry } from './tools/agent/index.js';
 import type { ScopedToolContext } from './stakeholder-context.js';
 import { resolveAllowedListIds } from './tools/stakeholder/_scope-helper.js';
 import { itemsToCSV, itemsToMarkdown, itemsToXLSX, sanitizeFilename } from './roadmap/export.js';
@@ -193,6 +194,98 @@ defaultApp.post('/s/mcp', async (c) => {
 		version: VERSION,
 		tools: stakeholderToolRegistry,
 		toolContext,
+	});
+
+	if (response === null) {
+		return new Response(null, { status: 202 });
+	}
+	return Response.json(response);
+});
+
+// === Agent MCP at /a/mcp (BL-023) ============================================
+//
+// Headless agents (e.g. Hermes) authenticate with a static blz_at_ bearer
+// token and get create/edit/share access — NO admin tools. The token resolves
+// to the FULL workspace context (it acts AS the owner who minted it), so the
+// tools run with the same WorkspaceToolCtx as the OAuth /mcp path; only the
+// registry is narrower (agentToolRegistry).
+defaultApp.post('/a/mcp', async (c) => {
+	const authHeader = c.req.header('authorization') ?? c.req.header('Authorization');
+	const match = authHeader?.match(/^Bearer\s+(.+)$/i);
+	const raw = match?.[1]?.trim();
+	if (!raw || !looksLikeAgentToken(raw)) {
+		return c.json(
+			{ error: 'invalid_token', error_description: 'Bearer agent token required.' },
+			401,
+		);
+	}
+
+	const hash = await sha256Hex(raw);
+	const db = getDb(c.env);
+	const now = new Date();
+	const nowSeconds = Math.floor(now.getTime() / 1000);
+
+	const tokenRows = await db
+		.select()
+		.from(schema.agent_tokens)
+		.where(
+			and(
+				eq(schema.agent_tokens.token_hash, hash),
+				isNull(schema.agent_tokens.revoked_at),
+				or(
+					isNull(schema.agent_tokens.expires_at),
+					gt(schema.agent_tokens.expires_at, new Date(nowSeconds * 1000)),
+				),
+			),
+		)
+		.limit(1);
+	const token = tokenRows[0];
+	if (!token) {
+		return c.json({ error: 'invalid_token', error_description: 'Token not recognized.' }, 401);
+	}
+	if (!token.created_by) {
+		return c.json(
+			{ error: 'invalid_token', error_description: 'Token has no owner context.' },
+			401,
+		);
+	}
+
+	c.executionCtx.waitUntil(
+		db
+			.update(schema.agent_tokens)
+			.set({ last_used_at: now, use_count: sql`use_count + 1` })
+			.where(eq(schema.agent_tokens.id, token.id)),
+	);
+
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return Response.json(
+			errorResponse(null, RpcError.PARSE_ERROR, 'Invalid JSON in request body'),
+			{ status: 400 },
+		);
+	}
+	const isReq = isJsonRpcRequest(body);
+	const isNotif = isNotification(body);
+	if (!isReq && !isNotif) {
+		return Response.json(
+			errorResponse(null, RpcError.INVALID_REQUEST, 'Not a valid JSON-RPC 2.0 message'),
+			{ status: 400 },
+		);
+	}
+	const message = body as JsonRpcRequest | JsonRpcNotification;
+
+	const response = await handleMcpMessage(message, {
+		name: 'blitzlist',
+		version: VERSION,
+		tools: agentToolRegistry,
+		toolContext: {
+			user_id: token.created_by,
+			workspace_id: token.workspace_id,
+			db,
+			env: c.env,
+		},
 	});
 
 	if (response === null) {
