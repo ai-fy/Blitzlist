@@ -272,12 +272,16 @@ defaultApp.post('/s/mcp', async (c) => {
 // tools run with the same WorkspaceToolCtx as the OAuth /mcp path; only the
 // registry is narrower (agentToolRegistry).
 defaultApp.post('/a/mcp', async (c) => {
+	// Primary: Authorization: Bearer <token> (recommended). Fallback: a
+	// ?token=<token> query param, for MCP clients that can only take a URL
+	// and can't set custom headers. URL-borne credentials get logged by
+	// intermediaries — prefer the header when the client supports it.
 	const authHeader = c.req.header('authorization') ?? c.req.header('Authorization');
 	const match = authHeader?.match(/^Bearer\s+(.+)$/i);
-	const raw = match?.[1]?.trim();
+	const raw = (match?.[1] ?? c.req.query('token'))?.trim();
 	if (!raw || !looksLikeAgentToken(raw)) {
 		return c.json(
-			{ error: 'invalid_token', error_description: 'Bearer agent token required.' },
+			{ error: 'invalid_token', error_description: 'Agent token required (Authorization: Bearer header, or ?token= query param).' },
 			401,
 		);
 	}
