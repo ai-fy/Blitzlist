@@ -128,6 +128,19 @@ export function renderRoadmap(input: RenderInput): string {
 	const isClosed = !!meta.closed_at;
 	const breakdown = meta.breakdown;
 
+	// Compact-header (Variant B) computed bits.
+	const doneCount = items.filter((it) => {
+		const s = (it.fields_json as Record<string, unknown>).state;
+		return typeof s === 'string' && terminalStates.has(s);
+	}).length;
+	const totalCount = items.length;
+	const donePct = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100);
+	const metaHtml = renderListMeta(meta, isClosed);
+	const setDefaultBtn =
+		can.edit && listDefault !== view
+			? `<form class="ovf-setdefault" method="POST" action="/r/${escape(share_code)}/view-default"><input type="hidden" name="view" value="${view}" /><button type="submit">Set ${escape(VIEW_LABELS[view])} as default view</button></form>`
+			: '';
+
 	return `<!doctype html>
 <html lang="en">
 <head>
@@ -151,40 +164,41 @@ export function renderRoadmap(input: RenderInput): string {
 <body>
 	<div class="bg-gradient"></div>
 
-	<header>
-		<div class="brand-row">
-			<a class="brand" href="https://blitzlist.ai" rel="noopener">
-				<img src="https://blitzlist-landing.pages.dev/img/logo-256.png" alt="" width="28" height="28" />
-				<span>Blitzlist</span>
-			</a>
-			<span class="ws">${escape(workspace.name)}</span>
+	<header class="topbar">
+		<div class="topbar-row">
+			<h1 class="topbar-title">${escape(list.name)}</h1>
+			<span class="topbar-count" title="${doneCount} of ${totalCount} done${totalCount ? ` · ${donePct}%` : ''}">${doneCount}/${totalCount}</span>
+			<nav class="topbar-views" role="tablist" aria-label="View">
+				${IMPLEMENTED_VIEWS.map(
+					(v) =>
+						`<a class="tbv ${v === view ? 'is-active' : ''}" href="?view=${v}" title="${escape(VIEW_LABELS[v])}" aria-label="${escape(VIEW_LABELS[v])}" aria-current="${v === view ? 'page' : 'false'}">${VIEW_ICONS[v]}</a>`,
+				).join('')}
+			</nav>
+			<details class="ovf">
+				<summary aria-label="More">${OVERFLOW_ICON}</summary>
+				<div class="ovf-panel" role="menu">
+					<div class="ovf-ws"><span class="ovf-brand">⚡ Blitzlist</span><span class="ovf-wsname">${escape(workspace.name)}</span></div>
+					${interactive ? `<div class="ovf-section"><div class="ovf-label">you can</div>${renderHeaderCaps(permissions, input.display_name, share_code)}</div>` : ''}
+					${setDefaultBtn ? `<div class="ovf-section">${setDefaultBtn}</div>` : ''}
+					<div class="ovf-section">
+						<div class="ovf-label">export</div>
+						<div class="ovf-exports">
+							<a href="/r/${escape(share_code)}/export.csv" download><span class="ext-tag">CSV</span></a>
+							<a href="/r/${escape(share_code)}/export.md" download><span class="ext-tag">MD</span></a>
+							<a href="/r/${escape(share_code)}/export.xlsx" download><span class="ext-tag">XLSX</span></a>
+						</div>
+					</div>
+				</div>
+			</details>
 		</div>
-		<div class="header-meta">
-			${interactive ? renderHeaderCaps(permissions, input.display_name, share_code) : ''}
-		</div>
+		<div class="topbar-progress" role="img" aria-label="${donePct}% complete"><span style="width:${donePct}%"></span></div>
 	</header>
 
 	<main>
 		${input.flash ? `<div class="flash flash-${input.flash.kind}">${escape(input.flash.message)}</div>` : ''}
-
-		<section class="hero">
-			<div class="hero-meta-row">
-				<div class="hero-controls">
-					${renderViewSwitcher(view, listDefault, share_code, can.edit)}
-					${renderExportDropdown(share_code)}
-				</div>
-				<div class="hero-meta">${renderListMeta(meta, isClosed)}</div>
-			</div>
-			<div class="hero-row">
-				<div class="hero-glyph">${DIAMOND_SVG_LARGE(toneForList(meta, isClosed))}</div>
-				<div class="hero-text">
-					<div class="hero-eyebrow">${template ? escape(humanizeTemplate(template.slug)) : 'List'}</div>
-					<h1 class="hero-title">${escape(list.name)}</h1>
-					${list.description ? `<p class="hero-desc">${escape(list.description)}</p>` : ''}
-				</div>
-			</div>
-			${isClosed && breakdown ? renderBreakdown(breakdown, items, stateField) : renderLiveSummary(items, stateField)}
-		</section>
+		${list.description ? `<p class="list-desc">${escape(list.description)}</p>` : ''}
+		${metaHtml ? `<div class="list-meta">${metaHtml}</div>` : ''}
+		${isClosed && breakdown ? `<div class="list-audit">${renderBreakdown(breakdown, items, stateField)}</div>` : ''}
 
 		<section class="items items-view-${view}">
 			${renderItemsForView(view, {
@@ -274,39 +288,6 @@ function renderBreakdown(
 			</details>`
 					: ''
 			}
-		</div>
-	`;
-}
-
-function renderLiveSummary(items: ItemRow[], stateField: FieldDef | undefined): string {
-	if (items.length === 0) return '';
-	// For OPEN lists, render a state-distribution sparkline
-	const stateCounts = new Map<string, number>();
-	for (const item of items) {
-		const fields = item.fields_json as Record<string, unknown>;
-		const s = typeof fields.state === 'string' ? fields.state : 'unstated';
-		stateCounts.set(s, (stateCounts.get(s) ?? 0) + 1);
-	}
-	const terminal = new Set(stateField?.terminal ?? []);
-	const done = Array.from(stateCounts)
-		.filter(([s]) => terminal.has(s))
-		.reduce((n, [, c]) => n + c, 0);
-	const total = items.length;
-	const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-
-	return `
-		<div class="audit live" role="group" aria-label="Progress">
-			<div class="audit-strip">
-				<span class="audit-rate"><strong>${pct}%</strong> complete</span>
-				<span class="live-tag">live</span>
-				<span class="audit-sep" aria-hidden="true"></span>
-				<span class="legend-item tone-shipped"><span class="dot"></span><span class="legend-count">${done}</span> done</span>
-				<span class="legend-item tone-neutral"><span class="dot"></span><span class="legend-count">${total - done}</span> open</span>
-			</div>
-			<div class="audit-bar">
-				<div class="bar-seg seg-delivered" style="width:${pct}%"></div>
-				<div class="bar-seg seg-empty" style="width:${100 - pct}%"></div>
-			</div>
 		</div>
 	`;
 }
@@ -816,50 +797,8 @@ const VIEW_ICONS: Record<ImplementedView, string> = {
 	todo: `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="2" y="3.5" width="2.5" height="2.5" rx="0.4" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="8" width="2.5" height="2.5" rx="0.4" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 4.75l0.6 0.6L4 4.3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 4.75h6M6 9.25h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
 };
 
-function renderViewSwitcher(
-	active: ImplementedView,
-	listDefault: DefaultView | undefined,
-	shareCode: string,
-	canEdit: boolean,
-): string {
-	const buttons = IMPLEMENTED_VIEWS.map((v) => {
-		const isActive = v === active;
-		const isDefault = listDefault === v;
-		return `<a class="view-btn ${isActive ? 'is-active' : ''} ${isDefault ? 'is-default' : ''}" href="?view=${v}" aria-current="${isActive ? 'page' : 'false'}" title="${escape(VIEW_LABELS[v])}${isDefault ? ' (default for this list)' : ''}">
-			${VIEW_ICONS[v]}<span>${escape(VIEW_LABELS[v])}</span>
-		</a>`;
-	}).join('');
-	const setDefault = canEdit && listDefault !== active
-		? `<form class="view-set-default" method="POST" action="/r/${escape(shareCode)}/view-default">
-				<input type="hidden" name="view" value="${active}" />
-				<button type="submit" title="Make ${escape(VIEW_LABELS[active])} the default view for this list">Set as default</button>
-			</form>`
-		: '';
-	return `<div class="view-switcher" role="tablist">${buttons}${setDefault}</div>`;
-}
-
 const SPEECH_ICON = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 3.5h10v5H7l-3 2.5v-2.5H2v-5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
-
-function renderExportDropdown(shareCode: string): string {
-	return `
-		<details class="export-dropdown">
-			<summary>
-				${DOWNLOAD_ICON}<span>Export</span>${CHEVRON_DOWN_ICON}
-			</summary>
-			<div class="export-menu" role="menu">
-				<a class="export-menu-item" role="menuitem" href="/r/${escape(shareCode)}/export.csv" download>
-					<span class="ext-tag">CSV</span><span class="ext-name">Comma-separated values</span>
-				</a>
-				<a class="export-menu-item" role="menuitem" href="/r/${escape(shareCode)}/export.md" download>
-					<span class="ext-tag">MD</span><span class="ext-name">Markdown</span>
-				</a>
-				<a class="export-menu-item" role="menuitem" href="/r/${escape(shareCode)}/export.xlsx" download>
-					<span class="ext-tag">XLSX</span><span class="ext-name">Microsoft Excel</span>
-				</a>
-			</div>
-		</details>
-	`;
-}
+const OVERFLOW_ICON = `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/></svg>`;
 
 function capIcon(p: StakeholderPermission): string {
 	switch (p) {
@@ -1010,37 +949,8 @@ function stateTone(state: string): StateTone {
 	return 'neutral';
 }
 
-function toneForList(meta: ListMeta, isClosed: boolean): StateTone {
-	if (isClosed && meta.breakdown) {
-		const counted = meta.breakdown.delivered.length + meta.breakdown.slipped.length;
-		if (counted === 0) return 'neutral';
-		const rate = meta.breakdown.delivered.length / counted;
-		if (rate >= 0.8) return 'shipped';
-		if (rate >= 0.5) return 'at-risk';
-		return 'off-track';
-	}
-	return 'on-track';
-}
-
 function humanizeState(state: string): string {
 	return state.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function humanizeTemplate(slug: string | undefined): string {
-	if (!slug) return 'List';
-	switch (slug) {
-		case 'release': return 'Release';
-		case 'sprint': return 'Sprint';
-		case 'backlog': return 'Backlog';
-		case 'bugs': return 'Bugs';
-		case 'todos': return 'Todos';
-		case 'ideas': return 'Ideas';
-		case 'shopping': return 'Shopping list';
-		case 'wishlist': return 'Wishlist';
-		case 'invite': return 'Invite list';
-		case 'picnic': return 'Picnic';
-		default: return slug.charAt(0).toUpperCase() + slug.slice(1);
-	}
 }
 
 function formatDate(s: string): string {
@@ -1075,7 +985,6 @@ function escape(s: string): string {
 // Header brand uses the logo PNG hosted on the landing site; the diamond
 // glyph constant is no longer needed (kept for the per-item card variants).
 
-const DOWNLOAD_ICON = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M3.5 6.5L7 10l3.5-3.5M2.5 12h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 const CHEVRON_DOWN_ICON = `<svg class="chev" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -1098,13 +1007,13 @@ function pageScript(shareCode: string): string {
 
 	// === Dropdown close-on-outside-click + Escape =========================
 	document.addEventListener('click', function (e) {
-		document.querySelectorAll('details.export-dropdown[open]').forEach(function (d) {
+		document.querySelectorAll('details.export-dropdown[open], details.ovf[open]').forEach(function (d) {
 			if (!d.contains(e.target)) d.removeAttribute('open');
 		});
 	});
 	document.addEventListener('keydown', function (e) {
 		if (e.key === 'Escape') {
-			document.querySelectorAll('details.export-dropdown[open]').forEach(function (d) {
+			document.querySelectorAll('details.export-dropdown[open], details.ovf[open]').forEach(function (d) {
 				d.removeAttribute('open');
 			});
 		}
@@ -1536,10 +1445,6 @@ function pageScript(shareCode: string): string {
 </script>`;
 }
 
-function DIAMOND_SVG_LARGE(tone: StateTone): string {
-	return `<svg class="hero-diamond tone-${tone}" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 4l20 20-20 20L4 24 24 4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M24 14l10 10-10 10-10-10 10-10z" fill="currentColor" fill-opacity="0.15"/></svg>`;
-}
-
 const STATUS_ICONS: Record<StateTone, string> = {
 	'on-track': `<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 	'at-risk': `<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3.5M8 11v.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
@@ -1650,9 +1555,84 @@ header {
 
 main {
 	flex: 1;
-	padding: clamp(var(--space-4), 4vw, var(--space-5)) clamp(var(--space-4), 5vw, var(--space-7));
+	padding: var(--space-3) clamp(var(--space-4), 5vw, var(--space-7)) var(--space-6);
 	max-width: 1080px; margin: 0 auto; width: 100%;
 }
+
+/* === Compact top bar (Variant B) ===================================== */
+.topbar {
+	position: sticky; top: 0; z-index: 5;
+	background: color-mix(in srgb, var(--bg-0) 88%, transparent);
+	backdrop-filter: saturate(1.2) blur(8px);
+	border-bottom: 1px solid var(--border);
+}
+.topbar-row {
+	display: flex; align-items: center; gap: var(--space-2);
+	max-width: 1080px; margin: 0 auto;
+	padding: 10px clamp(var(--space-4), 5vw, var(--space-7));
+}
+.topbar-title {
+	font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg);
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	min-width: 0; flex: 1;
+}
+.topbar-count {
+	flex-shrink: 0; font-family: var(--font-mono); font-size: 11.5px;
+	color: var(--fg-3); background: var(--bg-2);
+	border-radius: 999px; padding: 2px 8px;
+}
+.topbar-views { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.topbar-views .tbv {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 30px; height: 30px; border-radius: 7px;
+	color: var(--fg-4); transition: color 0.12s, background 0.12s;
+}
+.topbar-views .tbv svg { width: 15px; height: 15px; }
+.topbar-views .tbv:hover { color: var(--fg-2); background: var(--bg-2); }
+.topbar-views .tbv.is-active { color: var(--accent); background: var(--bg-2); }
+.topbar-progress { height: 2px; background: transparent; }
+.topbar-progress > span { display: block; height: 100%; background: var(--shipped); box-shadow: 0 0 6px var(--shipped-glow); transition: width 0.3s ease; }
+
+/* Overflow menu */
+.ovf { position: relative; flex-shrink: 0; }
+.ovf > summary {
+	list-style: none; cursor: pointer;
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 30px; height: 30px; border-radius: 7px; color: var(--fg-3);
+}
+.ovf > summary::-webkit-details-marker { display: none; }
+.ovf > summary svg { width: 16px; height: 16px; }
+.ovf > summary:hover { color: var(--fg); background: var(--bg-2); }
+.ovf-panel {
+	position: absolute; right: 0; top: calc(100% + 6px);
+	min-width: 230px; z-index: 20;
+	background: var(--bg-1); border: 1px solid var(--border-bright);
+	border-radius: 12px; padding: var(--space-3);
+	box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+	display: flex; flex-direction: column; gap: var(--space-3);
+}
+.ovf-ws { display: flex; flex-direction: column; gap: 2px; }
+.ovf-brand { font-size: 13px; font-weight: 600; color: var(--fg); }
+.ovf-wsname { font-size: 12px; color: var(--fg-3); }
+.ovf-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: var(--space-3); }
+.ovf-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-4); }
+.ovf-exports { display: flex; gap: 8px; }
+.ovf-exports a {
+	flex: 1; text-align: center; padding: 6px 0; border-radius: 6px;
+	border: 1px solid var(--border-bright); color: var(--fg-2); font-size: 11px; font-weight: 600;
+}
+.ovf-exports a:hover { background: var(--bg-2); color: var(--fg); }
+.ovf-setdefault button {
+	width: 100%; text-align: left; cursor: pointer;
+	background: transparent; border: 1px solid var(--border-bright); color: var(--fg-2);
+	border-radius: 8px; padding: 8px 10px; font-size: 12.5px; font-family: inherit;
+}
+.ovf-setdefault button:hover { background: var(--bg-2); color: var(--fg); }
+
+/* Optional secondary lines under the bar */
+.list-desc { font-size: 14px; color: var(--fg-2); line-height: 1.55; margin: var(--space-2) 0 0; max-width: 70ch; }
+.list-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.list-audit { margin-top: var(--space-3); }
 
 /* === Hero === */
 /* Kept deliberately compact so the list is visible almost immediately —
