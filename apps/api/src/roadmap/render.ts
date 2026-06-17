@@ -1157,19 +1157,24 @@ function pageScript(shareCode: string): string {
 			button.classList.add('is-pending');
 			postStateChange(decodeURIComponent(itemId), newState)
 				.then(function (data) {
+					button.disabled = false;
+					button.classList.remove('is-pending');
 					if (data.is_terminal) {
-						item.classList.add('is-done');
 						button.classList.add('checked');
 						button.innerHTML = ${JSON.stringify(CHECK_ICON)};
+						item.classList.add('is-done');
+						// Replay the completion animation from the top each time.
+						item.classList.remove('just-completed');
+						void item.offsetWidth; // force reflow so the animation restarts
+						item.classList.add('just-completed');
+						setTimeout(function () { item.classList.remove('just-completed'); }, 950);
 					} else {
 						item.classList.remove('is-done');
+						item.classList.remove('just-completed');
 						button.classList.remove('checked');
 						button.innerHTML = '';
 					}
 					if (data.next_toggle_state) input.value = data.next_toggle_state;
-					button.disabled = false;
-					button.classList.remove('is-pending');
-					flashCell(button);
 				})
 				.catch(function (err) {
 					console.error('todo toggle failed', err);
@@ -1914,11 +1919,15 @@ main {
 	padding: 0;
 	transition: border-color 0.15s, background 0.15s;
 }
-.todo-checkbox svg { width: 12px; height: 12px; }
+.todo-checkbox svg { width: 13px; height: 13px; }
+.todo-checkbox svg path { stroke-width: 2.2; } /* bolder tick — legible on mobile */
 .todo-checkbox:hover { border-color: var(--shipped); background: rgba(76, 183, 130, 0.06); }
+/* Checked: SOLID green fill + WHITE tick. The old faint-green-on-green tick was
+   invisible (esp. on mobile) — this is unmistakable. */
 .todo-checkbox.checked {
-	background: rgba(76, 183, 130, 0.15);
+	background: var(--shipped);
 	border-color: var(--shipped);
+	color: #fff;
 }
 .todo-checkbox.static { cursor: default; }
 .todo-checkbox.is-pending { opacity: 0.5; cursor: progress; }
@@ -1933,10 +1942,46 @@ main {
 }
 .todo-body { flex: 1; min-width: 0; }
 .todo-head { display: flex; align-items: center; gap: var(--space-2); }
-.todo-title { color: var(--fg); font-weight: 500; font-size: 14px; }
+.todo-title {
+	color: var(--fg); font-weight: 500; font-size: 14px;
+	position: relative; transition: color 0.3s ease 0.18s;
+}
+/* Animated strikethrough: a line that draws left→right, sequenced just after
+   the row flash (transition-delay). Already-done items on load show it
+   statically (no transition fires on initial render). */
+.todo-title::after {
+	content: ''; position: absolute; left: 0; top: 52%;
+	width: 100%; height: 1.5px; background: currentColor;
+	transform: scaleX(0); transform-origin: left center;
+	transition: transform 0.32s cubic-bezier(.4,0,.2,1) 0.18s;
+	pointer-events: none;
+}
 .todo-id { color: var(--fg-4); font-size: 11px; }
-.todo-item.is-done .todo-title { text-decoration: line-through; color: var(--fg-3); }
+.todo-item.is-done .todo-title { color: var(--fg-3); }
+.todo-item.is-done .todo-title::after { transform: scaleX(1); }
 .todo-item.is-done .todo-desc { color: var(--fg-4); }
+
+/* "Atemberaubend": the whole row flashes green on completion, the checkbox
+   pops, then settles. Driven by a transient .just-completed class. */
+.todo-item.just-completed { animation: todo-complete-row 0.9s cubic-bezier(.2,.7,.2,1); }
+.todo-item.just-completed .todo-checkbox { animation: todo-complete-pop 0.55s cubic-bezier(.34,1.56,.64,1); }
+@keyframes todo-complete-row {
+	0%   { background: transparent; box-shadow: inset 0 0 0 0 transparent; }
+	18%  { background: rgba(76, 183, 130, 0.28); box-shadow: inset 3px 0 0 0 var(--shipped), 0 0 26px -6px var(--shipped-glow); }
+	55%  { background: rgba(76, 183, 130, 0.12); }
+	100% { background: transparent; box-shadow: inset 0 0 0 0 transparent; }
+}
+@keyframes todo-complete-pop {
+	0%   { transform: scale(1); }
+	40%  { transform: scale(1.28) rotate(-4deg); }
+	70%  { transform: scale(0.94); }
+	100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.todo-item.just-completed,
+	.todo-item.just-completed .todo-checkbox { animation: none; }
+	.todo-title::after { transition: none; }
+}
 .todo-desc { color: var(--fg-3); font-size: 13px; margin-top: 2px; line-height: 1.5; }
 .todo-state { margin-top: 6px; }
 
