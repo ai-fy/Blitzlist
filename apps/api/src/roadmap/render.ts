@@ -755,7 +755,7 @@ function renderTodoView(args: ViewArgs): string {
 			: `<span class="todo-checkbox static ${isDone ? 'checked' : ''}">${isDone ? CHECK_ICON : ''}</span>`;
 		const tone: StateTone = isDone ? 'shipped' : state ? stateTone(state) : 'neutral';
 		return `
-			<li class="todo-item tone-${tone} ${isDone ? 'is-done' : ''}">
+			<li class="todo-item tone-${tone} ${isDone ? 'is-done' : ''}${canToggle ? ' is-toggleable' : ''}">
 				${checkbox}
 				<div class="todo-body">
 					<div class="todo-head">
@@ -1164,6 +1164,19 @@ function pageScript(shareCode: string): string {
 					console.error('todo toggle failed', err);
 					alert('Could not toggle: ' + err.message);
 				});
+		});
+	});
+
+	// Whole-row tap toggles the todo — a much bigger interaction area than the
+	// checkbox alone. Taps on the checkbox itself (native submit), links, or
+	// the comment control are left alone.
+	document.querySelectorAll('.todo-item.is-toggleable').forEach(function (item) {
+		item.addEventListener('click', function (e) {
+			if (e.target.closest('a, button, input, textarea, select, details, form.todo-toggle')) return;
+			var form = item.querySelector('form.todo-toggle');
+			if (!form) return;
+			if (typeof form.requestSubmit === 'function') form.requestSubmit();
+			else form.dispatchEvent(new Event('submit', { cancelable: true }));
 		});
 	});
 
@@ -2123,38 +2136,46 @@ main {
 }
 .todo-item {
 	display: flex;
-	align-items: flex-start;
-	gap: var(--space-3);
-	padding: var(--space-3) var(--space-4);
+	align-items: center;
+	gap: var(--space-2);
+	padding: 6px var(--space-4) 6px 8px;
 	border-bottom: 1px solid var(--border);
 	transition: background 0.12s;
 }
 .todo-item:last-child { border-bottom: none; }
-.todo-item:hover { background: var(--bg-2); }
-.todo-toggle { margin-top: 2px; }
+/* The whole row is the check target (toggle on tap); JS wires the click. */
+.todo-item.is-toggleable { cursor: pointer; }
+.todo-item.is-toggleable:hover { background: var(--bg-2); }
+/* The toggle form is a big tap zone with the visual box centred inside it. */
+.todo-toggle { margin: 0; display: flex; align-items: center; justify-content: center; }
 .todo-checkbox {
-	width: 18px; height: 18px;
+	width: 44px; height: 44px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	position: relative;
 	background: transparent;
-	border: 1.5px solid var(--fg-4);
-	border-radius: 4px;
+	border: none;
 	color: var(--shipped);
 	cursor: pointer;
 	padding: 0;
+	flex-shrink: 0;
+}
+.todo-checkbox::before {
+	content: '';
+	position: absolute;
+	width: 22px; height: 22px;
+	border: 1.5px solid var(--fg-4);
+	border-radius: 5px;
+	background: transparent;
 	transition: border-color 0.15s, background 0.15s;
 }
-.todo-checkbox svg { width: 13px; height: 13px; }
+.todo-checkbox svg { width: 15px; height: 15px; position: relative; }
 .todo-checkbox svg path { stroke-width: 2.2; } /* bolder tick — legible on mobile */
-.todo-checkbox:hover { border-color: var(--shipped); background: rgba(76, 183, 130, 0.06); }
-/* Checked: SOLID green fill + WHITE tick. The old faint-green-on-green tick was
-   invisible (esp. on mobile) — this is unmistakable. */
-.todo-checkbox.checked {
-	background: var(--shipped);
-	border-color: var(--shipped);
-	color: #fff;
-}
+.todo-checkbox:hover::before { border-color: var(--shipped); background: rgba(76, 183, 130, 0.06); }
+/* Checked: SOLID green fill + WHITE tick on the visual box (::before). */
+.todo-checkbox.checked::before { background: var(--shipped); border-color: var(--shipped); }
+.todo-checkbox.checked { color: #fff; }
 .todo-checkbox.static { cursor: default; }
 .todo-checkbox.is-pending { opacity: 0.5; cursor: progress; }
 .todo-checkbox.is-saved,
