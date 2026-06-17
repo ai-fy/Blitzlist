@@ -42,6 +42,10 @@ import {
 import { looksLikeStakeholderKey, looksLikeShareCode, looksLikeAgentToken, sha256Hex } from '@blitzlist/core';
 import type { Env, OAuthProps } from './env.js';
 import { consentGet, consentPost } from './oauth/consent.js';
+import { requestMagicLink, verifyMagicLink } from './auth/magic-link.js';
+import { createSession, destroySession, clearSessionCookie } from './auth/session.js';
+import { upsertUserByEmail, ensureUserHasWorkspace } from './auth/user.js';
+import { renderLogin, renderCheckInbox, renderAuthError } from './auth/login-page.js';
 import { getDb, nextItemId, uuid } from './db.js';
 import { toolRegistry } from './tools/index.js';
 import { stakeholderToolRegistry } from './tools/stakeholder/index.js';
@@ -90,6 +94,64 @@ defaultApp.get('/healthz', (c) => {
 
 defaultApp.get('/oauth/authorize', consentGet);
 defaultApp.post('/oauth/authorize', consentPost);
+
+// === Magic-link login (BL-024 phase 2) =======================================
+//
+// The consent screen redirects unauthenticated users here. Flow:
+//   POST /auth/login   — email + return_to → email a one-time verify link
+//   GET  /auth/verify  — consume token → upsert user → ensure workspace →
+//                        set session cookie → resume /oauth/authorize
+//   GET  /auth/logout  — clear session
+
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+defaultApp.post('/auth/login', async (c) => {
+	const form = await c.req.formData();
+	const emailRaw = (form.get('email') ?? '').toString().trim();
+	const returnTo = (form.get('return_to') ?? '').toString();
+	const clientName = 'the application';
+	if (!EMAIL_RX.test(emailRaw)) {
+		return c.html(renderLogin({ returnTo, clientName, error: 'Please enter a valid email address.' }), 400);
+	}
+	const origin = new URL(c.req.url).origin;
+	const result = await requestMagicLink(c.env, { email: emailRaw, returnTo, origin });
+	if (!result.ok) {
+		return c.html(
+			renderLogin({ returnTo, clientName, error: 'Could not send the sign-in email. Try again in a moment.' }),
+			502,
+		);
+	}
+	return c.html(renderCheckInbox({ email: emailRaw }));
+});
+
+defaultApp.get('/auth/verify', async (c) => {
+	const token = c.req.query('token') ?? '';
+	const payload = await verifyMagicLink(c.env, token);
+	if (!payload) {
+		return c.html(renderAuthError('This sign-in link is invalid or has expired. Start the connection again to get a fresh one.'), 400);
+	}
+	const db = getDb(c.env);
+	const { id: userId } = await upsertUserByEmail(db, payload.email);
+	await ensureUserHasWorkspace(db, c.env, userId, payload.email);
+	const cookie = await createSession(c.env, userId);
+
+	// Resume the original authorization, or land on a simple "signed in" page.
+	const search = payload.return_to ? (payload.return_to.startsWith('?') ? payload.return_to : `?${payload.return_to}`) : '';
+	const location = payload.return_to ? `/oauth/authorize${search}` : '/auth/done';
+	return new Response(null, {
+		status: 302,
+		headers: { Location: location, 'Set-Cookie': cookie },
+	});
+});
+
+defaultApp.get('/auth/done', (c) => {
+	return c.html(renderAuthError('You are signed in. You can close this tab.'));
+});
+
+defaultApp.get('/auth/logout', async (c) => {
+	await destroySession(c.env, c.req.header('cookie'));
+	return new Response(null, { status: 302, headers: { Location: '/', 'Set-Cookie': clearSessionCookie() } });
+});
 
 // === Stakeholder MCP at /s/mcp (BL-011) ======================================
 //

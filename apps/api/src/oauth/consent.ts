@@ -19,15 +19,18 @@ import { eq } from 'drizzle-orm';
 import { schema } from '@blitzlist/db';
 import type { Env, OAuthProps } from '../env.js';
 import { getDb } from '../db.js';
+import { readSessionUserId } from '../auth/session.js';
+import { renderLogin } from '../auth/login-page.js';
 
 type WorkspaceChoice = { id: string; name: string; slug: string; role: string };
 
 /**
- * Resolve the current consenting user. Phase 1: the bootstrap user. Phase 2
- * replaces this with the magic-link-authenticated identity.
+ * Resolve the current consenting user from the login session cookie (BL-024
+ * phase 2). Returns null when not signed in — the caller then shows the
+ * magic-link login screen.
  */
-function currentUserId(c: Context<{ Bindings: Env }>): string {
-	return c.env.BLITZLIST_SPIKE_USER_ID;
+async function currentUserId(c: Context<{ Bindings: Env }>): Promise<string | null> {
+	return readSessionUserId(c.env, c.req.header('cookie'));
 }
 
 async function membershipsFor(c: Context<{ Bindings: Env }>, userId: string): Promise<WorkspaceChoice[]> {
@@ -53,18 +56,31 @@ export async function consentGet(c: Context<{ Bindings: Env }>) {
 	const requestedScopes = oauthReqInfo.scope.length > 0 ? oauthReqInfo.scope : ['mcp'];
 	const encodedRequest = btoa(JSON.stringify(oauthReqInfo));
 
-	const userId = currentUserId(c);
+	// Not signed in → magic-link login. Carry the original authorize query so
+	// we can resume this exact authorization after the email click.
+	const userId = await currentUserId(c);
+	if (!userId) {
+		const returnTo = new URL(c.req.url).search.replace(/^\?/, '');
+		return c.html(renderLogin({ returnTo, clientName }));
+	}
+
 	const workspaces = await membershipsFor(c, userId);
 	const defaultWorkspaceId =
 		workspaces.find((w) => w.id === c.env.BLITZLIST_SPIKE_WORKSPACE_ID)?.id ??
 		workspaces[0]?.id ??
 		c.env.BLITZLIST_SPIKE_WORKSPACE_ID;
 
+	const emailRow = await getDb(c.env)
+		.select({ email: schema.users.email })
+		.from(schema.users)
+		.where(eq(schema.users.id, userId))
+		.limit(1);
+
 	return c.html(renderConsent({
 		clientName,
 		requestedScopes,
 		encodedRequest,
-		userDisplay: userId,
+		userDisplay: emailRow[0]?.email ?? userId,
 		workspaces,
 		defaultWorkspaceId,
 	}));
@@ -95,13 +111,19 @@ export async function consentPost(c: Context<{ Bindings: Env }>) {
 		return c.redirect(denyUrl.toString(), 302);
 	}
 
-	const userId = currentUserId(c);
+	const userId = await currentUserId(c);
+	if (!userId) {
+		return c.html(renderError('Your session expired. Start the connection again to sign in.'), 401);
+	}
 
 	// Validate the chosen workspace against the user's memberships — never trust
-	// the posted value. Fall back to the bootstrap workspace if absent/invalid.
+	// the posted value. Fall back to the user's first workspace if absent/invalid.
 	const workspaces = await membershipsFor(c, userId);
+	if (workspaces.length === 0) {
+		return c.html(renderError('Your account has no workspace. Contact support.'), 403);
+	}
 	const valid = workspaces.find((w) => w.id === chosenWorkspace);
-	const workspace_id = valid?.id ?? c.env.BLITZLIST_SPIKE_WORKSPACE_ID;
+	const workspace_id = valid?.id ?? workspaces[0]!.id;
 
 	const props: OAuthProps = { user_id: userId, workspace_id };
 

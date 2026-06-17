@@ -25,6 +25,10 @@ export type Env = {
 	//      replaced by real users + workspaces in BL-009 / v0.5) ===
 	BLITZLIST_SPIKE_USER_ID: string;
 	BLITZLIST_SPIKE_WORKSPACE_ID: string;
+
+	// === Magic-link email (BL-024 phase 2) ===
+	EMAIL_FROM: string; // non-secret sender address (wrangler.toml [vars])
+	RESEND_API_KEY: string; // SECRET — set via `wrangler secret put RESEND_API_KEY` / dashboard
 };
 
 /**

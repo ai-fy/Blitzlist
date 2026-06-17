@@ -21,6 +21,10 @@ compatibility_flags = ["nodejs_compat"]
 BLITZLIST_SPIKE_USER_ID = "usr-malte"
 BLITZLIST_SPIKE_WORKSPACE_ID = "ws-blitzlist"
 
+# Magic-link sender (BL-024 phase 2). Non-secret; the RESEND_API_KEY is a
+# secret set via `wrangler secret put RESEND_API_KEY` / the dashboard.
+EMAIL_FROM = "blitzlist@flowsy.de"
+
 # --- D1 database (primary store) ---
 [[d1_databases]]
 binding = "DB"
