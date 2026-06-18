@@ -1127,6 +1127,18 @@ function pageScript(shareCode: string): string {
 			item.classList.remove('is-done', 'just-completed');
 		}
 	}
+	// Recompute the header progress bar + count from the live DOM (todo view).
+	function refreshTodoProgress() {
+		var items = document.querySelectorAll('.todo-item');
+		if (!items.length) return;
+		var total = items.length;
+		var done = document.querySelectorAll('.todo-item.is-done').length;
+		var pct = total ? Math.round((done / total) * 100) : 0;
+		var bar = document.querySelector('.topbar-progress > span');
+		if (bar) bar.style.width = pct + '%';
+		var count = document.querySelector('.topbar-count');
+		if (count) count.textContent = done + '/' + total;
+	}
 	document.querySelectorAll('form.todo-toggle').forEach(function (form) {
 		form.addEventListener('submit', function (e) {
 			e.preventDefault();
@@ -1151,6 +1163,7 @@ function pageScript(shareCode: string): string {
 			}
 			if (input) input.value = goingToDone ? button.dataset.openState : button.dataset.doneState;
 			button.classList.add('is-pending');
+			refreshTodoProgress(); // move the bar + count immediately
 
 			postStateChange(decodeURIComponent(itemId), target)
 				.then(function () {
@@ -1161,6 +1174,7 @@ function pageScript(shareCode: string): string {
 					button.classList.remove('is-pending');
 					paintTodoDone(item, button, !goingToDone);
 					if (input) input.value = target;
+					refreshTodoProgress(); // undo the optimistic bar change
 					console.error('todo toggle failed', err);
 					alert('Could not toggle: ' + err.message);
 				});
