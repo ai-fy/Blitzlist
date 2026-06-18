@@ -1657,18 +1657,12 @@ main {
 }
 .topbar-views .view-switcher { display: flex; width: 100%; }
 .topbar-views .view-btn { flex: 1; justify-content: center; padding: 8px 11px; }
-/* Each list type gets its own colour (--vc); icon always tinted, active = a
-   soft fill of that colour. */
+/* Each list type carries its own colour in --vc; label + icon both use it
+   (see the .view-btn rules in the pill section). */
 .view-btn.view-list { --vc: var(--info); }
 .view-btn.view-kanban { --vc: var(--accent); }
 .view-btn.view-table { --vc: var(--shipped); }
 .view-btn.view-todo { --vc: var(--at-risk); }
-.view-btn svg { color: var(--vc); opacity: 0.9; }
-.view-btn.is-active {
-	color: var(--vc);
-	background: color-mix(in srgb, var(--vc) 16%, transparent);
-}
-.view-btn.is-active svg { opacity: 1; }
 .topbar-progress {
 	height: 2px; background: transparent;
 	/* Constrained to the list/content width, not full-bleed. */
@@ -2514,18 +2508,19 @@ footer .links { display: flex; gap: var(--space-4); }
 	gap: 6px;
 	padding: 5px 11px;
 	border-radius: 999px;
-	color: var(--fg-3);
+	/* Label + icon both in the view type's own colour (--vc), not violet. */
+	color: var(--vc, var(--fg-3));
 	font-size: 12.5px;
 	font-weight: 500;
-	transition: color 0.15s, background 0.15s;
+	transition: color 0.15s, background 0.15s, opacity 0.15s;
 }
-.view-btn svg { width: 13px; height: 13px; opacity: 0.85; }
-.view-btn:hover { color: var(--fg); background: var(--bg-2); }
+.view-btn svg { width: 13px; height: 13px; }
+.view-btn:not(.is-active) { opacity: 0.7; }
+.view-btn:hover { opacity: 1; background: var(--bg-2); }
 .view-btn.is-active {
-	color: var(--accent);
-	background: rgba(167, 139, 250, 0.08);
+	color: var(--vc, var(--accent));
+	background: color-mix(in srgb, var(--vc, var(--accent)) 16%, transparent);
 }
-.view-btn.is-active svg { opacity: 1; }
 .view-btn.is-default::after {
 	content: '';
 	display: inline-block;
