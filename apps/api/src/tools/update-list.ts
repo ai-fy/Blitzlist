@@ -14,7 +14,7 @@
  */
 
 import { and, eq, ne } from 'drizzle-orm';
-import { schema, type ListMeta } from '@blitzlist/db';
+import { schema, type ListMeta, type StakeholderScope } from '@blitzlist/db';
 import type { ToolDef } from '@blitzlist/mcp';
 import { uuid, type Db } from '../db.js';
 
@@ -286,6 +286,13 @@ export const updateList: ToolDef<UpdateListArgs, unknown, Db> = {
 			created_at: now,
 		});
 
+		// Renaming the slug would orphan any share code / stakeholder key whose
+		// scope targets this list by slug (their resolver matches on slug, so a
+		// stale slug = "link invalid"). Cascade the slug change into those scopes.
+		if (typeof changes.slug === 'string') {
+			await cascadeSlugInScopes(ctx.db, ctx.workspace_id, list.slug, changes.slug);
+		}
+
 		const updated = await ctx.db
 			.select()
 			.from(schema.lists)
@@ -298,6 +305,55 @@ export const updateList: ToolDef<UpdateListArgs, unknown, Db> = {
 		};
 	},
 };
+
+/**
+ * Rewrite a scope that targets `oldSlug` to target `newSlug`. Returns the new
+ * scope object if it changed, or null if this scope doesn't reference the slug.
+ */
+function rewriteScopeSlug(
+	scope: StakeholderScope | null | undefined,
+	oldSlug: string,
+	newSlug: string,
+): StakeholderScope | null {
+	if (!scope || typeof scope !== 'object') return null;
+	if (scope.type === 'list' && scope.list_slug === oldSlug) {
+		return { type: 'list', list_slug: newSlug };
+	}
+	if (scope.type === 'lists' && Array.isArray(scope.list_slugs) && scope.list_slugs.includes(oldSlug)) {
+		return { type: 'lists', list_slugs: scope.list_slugs.map((s) => (s === oldSlug ? newSlug : s)) };
+	}
+	return null;
+}
+
+/**
+ * When a list's slug changes, update every share code + stakeholder key in the
+ * workspace whose scope targets the old slug, so their links keep resolving.
+ */
+async function cascadeSlugInScopes(db: Db, workspaceId: string, oldSlug: string, newSlug: string): Promise<void> {
+	if (oldSlug === newSlug) return;
+
+	const codes = await db
+		.select({ id: schema.share_codes.code, scope_json: schema.share_codes.scope_json })
+		.from(schema.share_codes)
+		.where(eq(schema.share_codes.workspace_id, workspaceId));
+	for (const c of codes) {
+		const next = rewriteScopeSlug(c.scope_json as StakeholderScope, oldSlug, newSlug);
+		if (next) {
+			await db.update(schema.share_codes).set({ scope_json: next }).where(eq(schema.share_codes.code, c.id));
+		}
+	}
+
+	const keys = await db
+		.select({ id: schema.stakeholder_access_keys.id, scope_json: schema.stakeholder_access_keys.scope_json })
+		.from(schema.stakeholder_access_keys)
+		.where(eq(schema.stakeholder_access_keys.workspace_id, workspaceId));
+	for (const k of keys) {
+		const next = rewriteScopeSlug(k.scope_json as StakeholderScope, oldSlug, newSlug);
+		if (next) {
+			await db.update(schema.stakeholder_access_keys).set({ scope_json: next }).where(eq(schema.stakeholder_access_keys.id, k.id));
+		}
+	}
+}
 
 function serializeList(row: typeof schema.lists.$inferSelect) {
 	return {
