@@ -135,6 +135,12 @@ export function renderRoadmap(input: RenderInput): string {
 	}).length;
 	const totalCount = items.length;
 	const donePct = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100);
+	// Link-preview (Open Graph / WhatsApp) text + image.
+	const ogStats = totalCount === 0
+		? 'Empty list'
+		: `${totalCount} item${totalCount === 1 ? '' : 's'} · ${donePct}% done`;
+	const ogDescription = list.description ? `${list.description} · ${ogStats}` : `${ogStats} · shared on Blitzlist`;
+	const ogImage = `${view_url}/og.png`;
 	const metaHtml = renderListMeta(meta, isClosed);
 	const setDefaultBtn =
 		can.edit && listDefault !== view
@@ -147,14 +153,24 @@ export function renderRoadmap(input: RenderInput): string {
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width,initial-scale=1" />
 	<title>${escape(list.name)} — ${escape(workspace.name)}</title>
-	<meta name="description" content="${escape(list.description ?? list.name)}" />
+	<meta name="description" content="${escape(ogDescription)}" />
 	<meta name="theme-color" content="#08090a" />
 	<meta name="robots" content="noindex" />
 	<meta name="share-code" content="${escape(share_code)}" />
-	<meta property="og:title" content="${escape(list.name)} — ${escape(workspace.name)}" />
-	<meta property="og:description" content="${escape(list.description ?? list.name)}" />
+	<meta property="og:site_name" content="Blitzlist" />
+	<meta property="og:title" content="${escape(list.name)}" />
+	<meta property="og:description" content="${escape(ogDescription)}" />
 	<meta property="og:type" content="website" />
 	<meta property="og:url" content="${escape(view_url)}" />
+	<meta property="og:image" content="${escape(ogImage)}" />
+	<meta property="og:image:type" content="image/png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta property="og:image:alt" content="${escape(list.name)} on Blitzlist" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="${escape(list.name)}" />
+	<meta name="twitter:description" content="${escape(ogDescription)}" />
+	<meta name="twitter:image" content="${escape(ogImage)}" />
 	<link rel="preconnect" href="https://rsms.me/" />
 	<link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
 	<link rel="icon" type="image/png" href="https://blitzlist-landing.pages.dev/img/favicon.png" />

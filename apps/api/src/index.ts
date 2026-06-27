@@ -54,6 +54,7 @@ import type { ScopedToolContext } from './stakeholder-context.js';
 import { resolveAllowedListIds } from './tools/stakeholder/_scope-helper.js';
 import { itemsToCSV, itemsToMarkdown, itemsToXLSX, sanitizeFilename } from './roadmap/export.js';
 import { renderRoadmap } from './roadmap/render.js';
+import { renderOgImage } from './roadmap/og-image.js';
 import { getObject } from './r2.js';
 import { recordNovelStateForItem, recordNovelStateForList } from './tools/_state-extras-helper.js';
 
@@ -854,6 +855,45 @@ defaultApp.get('/r/:code/export.xlsx', async (c) => {
 			'cache-control': 'private, max-age=60',
 		},
 	});
+});
+
+// === /r/:code/og.png — dynamic Open Graph preview image =====================
+//
+// A 1200×630 branded card (list name + progress) so the shared link renders a
+// rich preview on WhatsApp / iMessage / Slack. On any failure (font fetch,
+// render) it falls back to the static logo so the preview is never broken.
+const OG_FALLBACK = 'https://blitzlist-landing.pages.dev/img/logo-256.png';
+defaultApp.get('/r/:code/og.png', async (c) => {
+	try {
+		const db = getDb(c.env);
+		const sc = await loadShareCode(db, c.req.param('code'));
+		if (!sc) return Response.redirect(OG_FALLBACK, 302);
+		const data = await loadExportData(db, sc);
+		if (!data) return Response.redirect(OG_FALLBACK, 302);
+		const wsRow = (
+			await db.select({ name: schema.workspaces.name }).from(schema.workspaces).where(eq(schema.workspaces.id, sc.workspace_id)).limit(1)
+		)[0];
+		const stateField = (data.template?.fields_schema_json as FieldDef[] | undefined ?? []).find(
+			(f) => f.key === 'state' && f.type === 'single_select',
+		);
+		const terminal = new Set(stateField?.terminal ?? []);
+		const total = data.items.length;
+		const done = data.items.filter((it) => {
+			const s = (it.fields_json as Record<string, unknown>).state;
+			return typeof s === 'string' && terminal.has(s);
+		}).length;
+		const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+		return await renderOgImage({
+			name: data.list.name,
+			workspaceName: wsRow?.name ?? 'Blitzlist',
+			total,
+			done,
+			pct,
+		});
+	} catch (err) {
+		console.error('og image failed', err);
+		return Response.redirect(OG_FALLBACK, 302);
+	}
 });
 
 // === /r/:code/file/:id — share-code-authenticated file streaming ============
