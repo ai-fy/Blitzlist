@@ -9,6 +9,11 @@ build/
 .turbo/
 *.tsbuildinfo
 
+# Exception: the landing page's dist/ is hand-authored static source (no build
+# step — see apps/landing/package.json), so it belongs in the repo.
+!apps/landing/dist/
+!apps/landing/dist/**
+
 # Cloudflare / Wrangler
 .wrangler/
 .dev.vars

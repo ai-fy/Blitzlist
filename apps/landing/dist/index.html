@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>Blitzlist — the list for hybrid human–agent teams</title>
+	<meta name="description" content="Blitzlist is the list for the AI era. A shared workspace for hybrid human–agent teams. AI-first. MCP-native. Open-source." />
+	<meta name="theme-color" content="#08090a" />
+
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content="https://blitzlist.ai/" />
+	<meta property="og:title" content="Blitzlist — the list for hybrid human–agent teams" />
+	<meta property="og:description" content="Lists drive everything. The AI era arrived without one. Blitzlist is the list — AI-first, MCP-native, open-source." />
+	<meta name="twitter:card" content="summary_large_image" />
+
+	<link rel="preconnect" href="https://rsms.me/" />
+	<link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+	<link rel="icon" type="image/png" href="/img/favicon.png" />
+	<link rel="apple-touch-icon" href="/img/logo-256.png" />
+
+	<!-- Blitz-Halo (shared across all Blitz products) -->
+	<link rel="stylesheet" href="https://cdn.blitzfunnel.ai/blitz-halo/1.1.0/blitz-halo.css">
+	<script src="https://cdn.blitzfunnel.ai/blitz-halo/1.1.0/blitz-halo.js" defer></script>
+
+	<style>
+		*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+		:root {
+			--bg-0: #08090a;
+			--bg-1: #0e0f11;
+			--bg-2: #16181c;
+			--border: #1c1e22;
+			--border-bright: #26282d;
+			--fg: #e6e6e8;
+			--fg-2: #b4b4bc;
+			--fg-3: #7a7b82;
+			--fg-4: #4e4f55;
+			--shipped: #4cb782;
+			--shipped-glow: rgba(76, 183, 130, 0.22);
+			--at-risk: #d4a017;
+			--off-track: #e5484d;
+			--accent: #a78bfa;
+			--accent-glow: rgba(167, 139, 250, 0.25);
+			/* Blitz-Halo: page bg used by the hollow-outline rotation word */
+			--halo-bg: #08090a;
+			--font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+			--font-mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+		}
+		@supports (font-variation-settings: normal) {
+			:root { --font-sans: 'Inter var', -apple-system, system-ui, sans-serif; }
+		}
+
+		html, body {
+			background: var(--bg-0);
+			color: var(--fg);
+			font-family: var(--font-sans);
+			-webkit-font-smoothing: antialiased;
+			font-size: 14px;
+			line-height: 1.55;
+		}
+		body { min-height: 100vh; display: flex; flex-direction: column; }
+		a { color: inherit; text-decoration: none; }
+		code { font-family: var(--font-mono); font-size: 0.86em; letter-spacing: -0.01em; }
+
+		.bg-gradient {
+			position: fixed; inset: 0; pointer-events: none; z-index: 0;
+			background:
+				radial-gradient(70vw 60vh at 50% -10%, rgba(167, 139, 250, 0.08), transparent 60%),
+				radial-gradient(50vw 40vh at 80% 110%, rgba(76, 183, 130, 0.06), transparent 60%);
+		}
+
+		header, main, footer { position: relative; z-index: 1; }
+
+		header {
+			display: flex; align-items: center; justify-content: space-between;
+			padding: 24px clamp(24px, 5vw, 64px);
+			border-bottom: 1px solid var(--border);
+		}
+		.brand { display: inline-flex; align-items: center; gap: 12px; font-weight: 600; font-size: 17px; letter-spacing: -0.015em; }
+		.brand img { width: 36px; height: 36px; display: block; }
+		nav { display: flex; gap: 24px; font-size: 13px; }
+		nav a { color: var(--fg-3); transition: color 0.15s; }
+		nav a:hover { color: var(--fg); }
+
+		main {
+			flex: 1;
+			padding: clamp(72px, 10vw, 144px) clamp(24px, 5vw, 64px);
+			max-width: 1080px; margin: 0 auto; width: 100%;
+		}
+		.hero { max-width: 760px; }
+
+		.hero-eyebrow {
+			display: inline-flex; align-items: center; gap: 8px;
+			padding: 6px 14px;
+			background: rgba(255, 255, 255, 0.04);
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			border-radius: 999px;
+			font-size: 12px;
+			color: var(--fg);
+			margin-bottom: 48px;
+		}
+		.hero-eyebrow .dot {
+			width: 6px; height: 6px; border-radius: 50%;
+			background: #fff;
+			box-shadow:
+				0 0 6px rgba(255, 255, 255, 0.6),
+				4px 0 8px #5b9bff,
+				-4px 0 8px #c061ff,
+				0 4px 8px #ffa64a,
+				0 -4px 8px #34e0cf;
+		}
+
+		h1.hero-title {
+			font-size: clamp(40px, 7vw, 76px);
+			font-weight: 600; line-height: 1.04;
+			letter-spacing: -0.035em;
+			margin-bottom: 36px;
+			color: var(--fg);
+		}
+		/* Blitz-Halo rotation word — same size as the headline so the rotated
+		   value reads as the closing phrase of the sentence. The outline glow
+		   needs a hair more line-height than the surrounding text or it gets
+		   clipped at the top/bottom of the line box. */
+		.hero-rotation {
+			display: block;
+			margin-top: 8px;
+			line-height: 1.15;
+		}
+		.hero-rotation .hl-rot { line-height: 1.15; }
+
+		.hero-poem {
+			font-size: 16px; color: var(--fg-3); line-height: 2;
+			margin-bottom: 48px;
+			max-width: 56ch;
+		}
+		.hero-poem .em { color: var(--fg); font-weight: 500; }
+
+		.hero-lines {
+			display: flex; flex-direction: column; gap: 14px;
+			margin-bottom: 72px;
+			font-size: 15px;
+			color: var(--fg-2);
+		}
+		.hero-lines .row { display: flex; align-items: center; gap: 12px; }
+		.hero-lines .check {
+			width: 16px; height: 16px;
+			color: var(--shipped);
+			flex-shrink: 0;
+		}
+
+		.cta-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 96px; }
+		.cta {
+			display: inline-flex; align-items: center; gap: 8px;
+			padding: 12px 20px;
+			border-radius: 8px;
+			font-size: 14px; font-weight: 500;
+			border: 1px solid var(--border-bright);
+			background: var(--bg-1);
+			color: var(--fg);
+			transition: all 0.15s ease;
+		}
+		.cta:hover {
+			border-color: var(--accent);
+			transform: translateY(-1px);
+		}
+		.cta.primary {
+			background: #fff;
+			border-color: #fff;
+			color: #0a0a0a;
+			box-shadow:
+				0 0 0 1px rgba(255, 255, 255, 0.2),
+				10px 0 28px rgba(91, 155, 255, 0.5),
+				-10px 0 28px rgba(192, 97, 255, 0.5),
+				0 10px 28px rgba(255, 166, 74, 0.45),
+				0 -10px 28px rgba(52, 224, 207, 0.45);
+		}
+		.cta.primary:hover {
+			background: #fff;
+			border-color: #fff;
+			transform: translateY(-1px);
+			box-shadow:
+				0 0 0 1px rgba(255, 255, 255, 0.3),
+				12px 0 36px rgba(91, 155, 255, 0.65),
+				-12px 0 36px rgba(192, 97, 255, 0.65),
+				0 12px 36px rgba(255, 166, 74, 0.55),
+				0 -12px 36px rgba(52, 224, 207, 0.55);
+		}
+		.cta svg { width: 14px; height: 14px; }
+
+		/* Three frictions section */
+		.frictions { margin-top: 128px; }
+		.section-eyebrow {
+			font-size: 12px; color: var(--fg-3);
+			text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+			margin-bottom: 24px;
+		}
+		.section-title {
+			font-size: clamp(24px, 3.5vw, 36px);
+			font-weight: 600; line-height: 1.15;
+			letter-spacing: -0.02em;
+			color: var(--fg);
+			margin-bottom: 72px;
+			max-width: 32ch;
+		}
+		.friction-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+			gap: 24px;
+		}
+		.friction {
+			padding: 32px;
+			background: var(--bg-1);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			transition: border-color 0.15s, box-shadow 0.2s;
+		}
+		.friction:hover {
+			border-color: var(--border-bright);
+			box-shadow: 0 0 32px -12px var(--accent-glow);
+		}
+		.friction-icon {
+			width: 32px; height: 32px;
+			display: flex; align-items: center; justify-content: center;
+			background: transparent;
+			border-radius: 8px;
+			color: #fff;
+			margin-bottom: 16px;
+		}
+		.friction-icon svg {
+			width: 18px; height: 18px;
+			filter:
+				drop-shadow(0 0 5px rgba(91, 155, 255, 0.55))
+				drop-shadow(0 0 6px rgba(192, 97, 255, 0.45))
+				drop-shadow(0 0 7px rgba(255, 166, 74, 0.35))
+				drop-shadow(0 0 7px rgba(52, 224, 207, 0.35));
+		}
+		.friction h3 { font-size: 15px; font-weight: 600; color: var(--fg); margin-bottom: 8px; }
+		.friction p { font-size: 13.5px; color: var(--fg-3); line-height: 1.6; }
+
+		.founder-note {
+			margin-top: 128px;
+			max-width: 760px;
+			display: grid;
+			grid-template-columns: 160px 1fr;
+			gap: 36px;
+			align-items: start;
+		}
+		.founder-photo-link {
+			display: inline-block; line-height: 0;
+			border-radius: 14px;
+			transition: transform 0.3s ease;
+		}
+		.founder-photo-link:hover { transform: translateY(-2px); }
+		.founder-photo {
+			width: 160px;
+			height: 160px;
+			border-radius: 14px;
+			object-fit: cover;
+			border: 1px solid var(--border-bright);
+			box-shadow: 0 0 0 1px var(--bg-0), 0 0 40px -8px var(--accent-glow);
+			transition: box-shadow 0.3s ease;
+		}
+		.founder-photo-link:hover .founder-photo {
+			box-shadow: 0 0 0 1px var(--bg-0), 0 0 60px -4px rgba(167, 139, 250, 0.4);
+		}
+		.founder-quote {
+			padding-left: 24px;
+			border-left: 2px solid var(--border-bright);
+		}
+		.founder-quote p {
+			font-size: 16px; color: var(--fg-2); line-height: 1.75;
+			font-style: italic;
+		}
+		.founder-quote .sig {
+			display: inline-flex; align-items: center; gap: 8px;
+			margin-top: 16px;
+			font-size: 12px; color: var(--fg-3); font-style: normal;
+			text-transform: uppercase; letter-spacing: 0.06em;
+			text-decoration: none;
+			transition: color 0.15s ease;
+		}
+		.founder-quote .sig:hover { color: var(--accent); }
+		.linkedin-glyph {
+			width: 14px; height: 14px;
+			opacity: 0.7;
+			transition: opacity 0.15s ease;
+		}
+		.founder-quote .sig:hover .linkedin-glyph { opacity: 1; }
+		@media (max-width: 600px) {
+			.founder-note {
+				grid-template-columns: 1fr;
+				gap: 24px;
+				justify-items: start;
+			}
+			.founder-photo { width: 140px; height: 140px; }
+		}
+
+		footer {
+			border-top: 1px solid var(--border);
+			padding: 16px clamp(20px, 4vw, 48px);
+			display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+			font-size: 12px; color: var(--fg-3);
+		}
+		footer a { color: var(--fg-3); transition: color 0.15s; }
+		footer a:hover { color: var(--fg); }
+		footer .links { display: flex; flex-wrap: wrap; gap: 20px; }
+
+		@media (max-width: 540px) {
+			nav { display: none; }
+			.cta { width: 100%; justify-content: center; }
+		}
+	</style>
+</head>
+<body>
+	<div class="bg-gradient"></div>
+
+	<header>
+		<a class="brand" href="/" aria-label="Blitzlist home">
+			<img src="/img/logo-256.png" alt="" width="36" height="36" />
+			<span>Blitzlist</span>
+		</a>
+		<nav>
+			<a href="#frictions">why</a>
+			<a href="#install">install</a>
+			<a href="https://github.com/ai-fy/Blitzlist" rel="noopener">github</a>
+			<a href="https://github.com/ai-fy/Blitzlist/blob/main/ARCHITECTURE.md" rel="noopener">architecture</a>
+		</nav>
+	</header>
+
+	<main>
+		<section class="hero">
+			<div class="hero-eyebrow">
+				<span class="dot"></span>
+				<span class="fx" data-t="v0.6 live · 37 MCP tools · open-source">v0.6 live · 37 MCP tools · open-source</span>
+			</div>
+
+			<h1 class="hero-title">One list for<span class="hero-rotation"><span class="hl-rot" data-zaps><span class="hl-w" data-words="human teams.,agent teams.,hybrid teams."></span></span></span></h1>
+
+			<p class="hero-poem">In boardrooms.   In sprint plans.   In family kitchens.<br />
+In Claude Code.   In grocery shopping.   In invite lists.<br /><br />
+<span class="em">The AI era arrived without one. We built it.</span></p>
+
+			<div class="hero-lines">
+				<div class="row">
+					<svg class="check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+					<span>AI-first. MCP-native. Persistent across sessions.</span>
+				</div>
+				<div class="row">
+					<svg class="check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+					<span>Shareable with teammates, customers, and their AI agents.</span>
+				</div>
+				<div class="row">
+					<svg class="check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+					<span>Open-source. Self-hostable on Cloudflare in three minutes.</span>
+				</div>
+			</div>
+
+			<div id="install" class="cta-row">
+				<a class="cta primary" href="https://claude.ai/?q=Connect+to+the+Blitzlist+MCP+server+at+https%3A%2F%2Fmcp.blitzlist.ai%2Fmcp" rel="noopener">
+					Get Blitzlist
+					<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+				</a>
+				<a class="cta" href="https://github.com/ai-fy/Blitzlist" rel="noopener">
+					<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.69-.01-1.35-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.81.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.22 2.2.82A7.5 7.5 0 018 3.95c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49 0 1.08-.01 1.95-.01 2.21 0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+					Star on GitHub
+				</a>
+			</div>
+		</section>
+
+		<section id="frictions" class="frictions">
+			<div class="section-eyebrow">The three frictions we erase</div>
+			<h2 class="section-title">Lists drove every era of human work. The AI era didn't have one.</h2>
+
+			<div class="friction-grid">
+				<div class="friction">
+					<div class="friction-icon"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M3 9a6 6 0 116 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="3" cy="9" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg></div>
+					<h3>Context dies at session boundaries</h3>
+					<p>Your Claude Code todos die in 24 hours. Blitzlist items live forever, in one workspace your agents and teammates can reach.</p>
+				</div>
+				<div class="friction">
+					<div class="friction-icon"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="2" y="3" width="14" height="11" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M2 7h14" stroke="currentColor" stroke-width="1.6"/></svg></div>
+					<h3>Artifacts can't move without humans</h3>
+					<p>Files, designs, docs get re-uploaded every session. Blitzbox attachments live in R2, accessible by reference from any MCP client.</p>
+				</div>
+				<div class="friction">
+					<div class="friction-icon"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 6h10M4 9h10M4 12h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+					<h3>AI-to-AI handoff drops state</h3>
+					<p>Claude doesn't know what GPT did last night. Blitzlist is the shared substrate — same MCP server serves every AI client.</p>
+				</div>
+			</div>
+		</section>
+
+		<aside class="founder-note">
+			<a class="founder-photo-link" href="https://www.linkedin.com/in/malte-fehr-a419546/" rel="noopener" target="_blank" aria-label="Malte Fehr on LinkedIn">
+				<img class="founder-photo" src="/img/malte.jpg" alt="Malte Fehr, founder of Blitzlist" width="160" height="160" loading="lazy" />
+			</a>
+			<div class="founder-quote">
+				<p>I spent my career using lists to channel people's energy toward a shared goal, mark progress, and ship the work — for ProSiebenSat.1's board, at the companies I founded, on the product teams I built. When I started working with AI agents, I noticed the list had disappeared. Every era of work had one. The AI era didn't. So I built Blitzlist.</p>
+				<a class="sig" href="https://www.linkedin.com/in/malte-fehr-a419546/" rel="noopener" target="_blank">
+					— Malte Fehr, founder
+					<svg class="linkedin-glyph" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2.5A1.5 1.5 0 1 1 3 5.5 1.5 1.5 0 0 1 3 2.5Zm-.7 4.2h1.4v7.6H2.3V6.7Zm3 0h1.35v1.04h.02c.19-.36.65-.74 1.34-.74 1.43 0 1.69.94 1.69 2.16v4.14h-1.4v-3.67c0-.88-.02-2.01-1.22-2.01-1.22 0-1.41.95-1.41 1.95v3.73H5.3V6.7Z"/></svg>
+				</a>
+			</div>
+		</aside>
+	</main>
+
+	<footer>
+		<div>© 2026 Blitzlist · AGPL-3.0 + commercial license</div>
+		<div class="links">
+			<a href="https://github.com/ai-fy/Blitzlist/blob/main/PRIVACY.md" rel="noopener">privacy</a>
+			<a href="https://github.com/ai-fy/Blitzlist/blob/main/LICENSE" rel="noopener">license</a>
+			<a href="https://github.com/ai-fy/Blitzlist" rel="noopener">github</a>
+			<a href="https://mcp.blitzlist.ai/mcp">mcp endpoint</a>
+		</div>
+	</footer>
+</body>
+</html>
